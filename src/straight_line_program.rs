@@ -1,18 +1,18 @@
-use num_complex::Complex32;
+use num_complex::Complex64;
 
 pub type MetaVar = Vec<u32>;
 
 pub type LineVar = u32;
 
-#[derive(Debug)]
-pub enum SLPVar { C(MetaVar), L(LineVar), F(Complex32),}
+#[derive(Debug, Clone, Copy)]
+pub enum SLPVar { L(LineVar), F(Complex64) }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Operation { Plus, Mult, }
 
 #[derive(Debug)]
 pub enum SLPLine {
-    Input(SLPVar),
+    Input(MetaVar),
     Compound((SLPVar, Operation, SLPVar)),
 }
 

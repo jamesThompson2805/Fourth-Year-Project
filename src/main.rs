@@ -1,6 +1,6 @@
 mod straight_line_program;
 mod parsing;
-mod decomposition;
+mod projection;
 
 use std::fs;
 
