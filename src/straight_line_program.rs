@@ -2,7 +2,7 @@ use num_complex::Complex64;
 
 pub type MetaVar = Vec<u32>;
 
-pub type LineVar = u32;
+pub type LineVar = usize;
 
 #[derive(Debug, Clone, Copy)]
 pub enum SLPVar { L(LineVar), F(Complex64) }

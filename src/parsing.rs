@@ -17,17 +17,20 @@ use nom::number::complete::float;
 
 use num_complex::Complex64;
 
-fn decimal_parser(input: &str) -> IResult<&str,u32> {
+fn dec32_parser(input: &str) -> IResult<&str,u32> {
     map_res( digit1, |s: &str| s.parse::<u32>()).parse(input)
+}
+fn dec_parser(input: &str) -> IResult<&str,usize> {
+    map_res( digit1, |s: &str| s.parse::<usize>()).parse(input)
 }
 
 fn metavar_parser(input: &str) -> IResult<&str, MetaVar> {
-    map( (tag("C"),tag("<"), separated_list1(tag(","), decimal_parser), tag(">")),
+    map( (tag("C"),tag("<"), separated_list1(tag(","), dec32_parser), tag(">")),
      |c| c.2).parse(input)
 }
 
 fn linevar_parser(input: &str) -> IResult<&str, LineVar> {
-    map( (tag("L"), decimal_parser),
+    map( (tag("L"), dec_parser),
      |c| c.1).parse(input)
 }
 
@@ -69,9 +72,8 @@ pub fn file_parser(input: &str) -> Result<SLP,String> {
             Ok((_s,slp_line)) => {
                 //if s != "" { return Err( format!("Error: line {l_no} : {line} not fully parsed, didn't parse {s}")); }
                 if let SLPLine::Compound(slp_tuple) = &slp_line {
-                    let l_no = l_no+1;
-                    if let SLPVar::L(n) = slp_tuple.0 && n >= l_no.try_into().unwrap() { return Err( format!("Error: line {l_no} : {line} refering to undeclared line : L{n}")); }
-                    if let SLPVar::L(n) = slp_tuple.2 && n >= l_no.try_into().unwrap() { return Err( format!("Error: line {l_no} : {line} refering to undeclared line : L{n}")); }
+                    if let SLPVar::L(n) = slp_tuple.0 && n >= l_no.try_into().unwrap()  { return Err( format!("Error: line {l_no} : {line} refering to undeclared line : L{n}")); }
+                    if let SLPVar::L(n) = slp_tuple.2 && n >= l_no.try_into().unwrap()  { return Err( format!("Error: line {l_no} : {line} refering to undeclared line : L{n}")); }
                 }
 
                 program.push(slp_line);
