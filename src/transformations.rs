@@ -33,6 +33,30 @@ enum PartialSLPLine {
 }
 type PartialSLP = Vec<PartialSLPLine>;
 
+fn stringify_partialslpvar(var: &PartialSLPVar) -> String {
+    use PartialSLPVar::*;
+    match var {
+        LineToTranslate((tm,lno)) => format!("{tm:?}.L{lno}"),
+        MetaVarRef(m) => format!("CR<{}>", m.into_iter().map(|i| i.to_string()).collect::<Vec<String>>().join(",")),
+        Coeff(c) => c.to_string(),
+        LineInProgram(lno) => format!("PL{lno}"),
+    }
+}
+fn stringify_partialslpline(line: &PartialSLPLine) -> String {
+    use PartialSLPLine::*;
+    match line {
+        Zero => "0".to_string(),
+        Input(m) => format!("C<{}>",m.into_iter().map(|i| i.to_string()).collect::<Vec<String>>().join(",")),
+        Compound((s1,Operation::Plus, s2)) => format!("{} + {}", stringify_partialslpvar(s1), stringify_partialslpvar(s2)),
+        Compound((s1,Operation::Mult, s2)) => format!("{} * {}", stringify_partialslpvar(s1), stringify_partialslpvar(s2)),
+        Jump((tm,lno)) => format!("{tm:?}.L{lno}"),
+    }
+}
+pub fn stringify_partialslp(p_slp: &PartialSLP) -> String {
+    p_slp.iter().enumerate().map(|(i,l)| "L".to_string() + i.to_string().as_str() + ": " + stringify_partialslpline(l).as_str() )
+        .collect::<Vec<String>>().join("\n")
+}
+
 
 // WE APPLY CONVENTION OF INDEX 0 HERE
 pub fn apply_e_ij(m: &MetaVar, i: usize, j: usize) -> Option<(MetaVar, Complex64)> {
@@ -135,6 +159,7 @@ fn transform_x_i_plus(s1: &SLPVar, s2: &SLPVar, vi: &TMatrix, partial_program: &
 }
 
 use std::cmp::min;
+use std::fmt::format;
 use std::iter::zip;
 
 fn get_all_subvecs_i(v: &[u32], i: u32) -> Vec<TMatrix> {
@@ -236,9 +261,25 @@ pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
 
 
     // Reverse all line reference values so they now point to where they will be in the list once reversed
+    let flip_line_ref = |prog_len: usize, mvar_len: usize, index: LineVar| { prog_len - index - 1 + mvar_len };
     line_ref.values_mut().for_each(|m| {
-        m.values_mut().for_each( |v| {*v = p_program.len() - *v - 1 + metavars_used.len(); } );
+        m.values_mut().for_each( |v| {*v = flip_line_ref(p_program.len(), metavars_used.len(), *v)} );
     });
+    // Reverse all line references in the partial program also
+    let p_program_len = p_program.len();
+    program_lines_to_flip.iter().for_each(|lno| {
+        use PartialSLPLine::*;
+        use PartialSLPVar::*;
+        if let Compound(tp) = &mut p_program[*lno] && let (LineInProgram(n1), _, LineInProgram(n2)) = tp {
+            tp.0 = LineInProgram( flip_line_ref(p_program_len, metavars_used.len(), *n1));
+            tp.2 = LineInProgram( flip_line_ref(p_program_len, metavars_used.len(), *n2));
+        } else if let Compound(tp) = &mut p_program[*lno] && let (LineInProgram(n1), _, _) = tp {
+            tp.0 = LineInProgram( flip_line_ref(p_program_len, metavars_used.len(), *n1));
+        } else if let Compound(tp) = &mut p_program[*lno] && let (_, _, LineInProgram(n2)) = tp {
+            tp.2 = LineInProgram( flip_line_ref(p_program_len, metavars_used.len(), *n2));
+        }
+    });
+
     // Chuck all the metavars onto the end of the program and add references to them in a map structure so references can be utilised
     let mut metavar_mapper = MetaVarLineMap::new();
     for (mi,m) in metavars_used.iter().enumerate() {
@@ -277,7 +318,7 @@ pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
     }
 
     
-    println!("Modified partial program:\n{p_program:?}");
+    println!("Modified partial program:\n{}", stringify_partialslp(&p_program));
 
 
     None
@@ -314,7 +355,7 @@ mod tests {
         use SLPVar::L;
         let s1 = L(101);
         let s2 = L(202);
-        let vi = vec![1,0,1,0,0,0,0,0,0];
+        let vi = vec![0,0,1,0,0,0,0,0,0];
         let mut p_program: PartialSLP = Vec::new();
         let mut lines_to_parse: LinesToParse = HashMap::new();
         let mut lines_to_flip: HashSet<usize> = HashSet::new();

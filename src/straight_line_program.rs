@@ -7,6 +7,7 @@ pub type LineVar = usize;
 #[derive(Debug, Clone, Copy)]
 pub enum SLPVar { L(LineVar), F(Complex64) }
 
+
 #[derive(Debug, Clone, Copy)]
 pub enum Operation { Plus, Mult, }
 
