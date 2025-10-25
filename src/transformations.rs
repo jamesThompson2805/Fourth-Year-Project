@@ -29,7 +29,7 @@ enum PartialSLPLine {
     Zero,
     Input(MetaVar),
     Compound((PartialSLPVar, Operation, PartialSLPVar)),
-    Jump( (TMatrix, LineVar) ),
+    Jump( PartialSLPVar ),
 }
 type PartialSLP = Vec<PartialSLPLine>;
 
@@ -49,10 +49,10 @@ fn stringify_partialslpline(line: &PartialSLPLine) -> String {
         Input(m) => format!("C<{}>",m.into_iter().map(|i| i.to_string()).collect::<Vec<String>>().join(",")),
         Compound((s1,Operation::Plus, s2)) => format!("{} + {}", stringify_partialslpvar(s1), stringify_partialslpvar(s2)),
         Compound((s1,Operation::Mult, s2)) => format!("{} * {}", stringify_partialslpvar(s1), stringify_partialslpvar(s2)),
-        Jump((tm,lno)) => format!("{tm:?}.L{lno}"),
+        Jump(s) => format!("{}",stringify_partialslpvar(s)),
     }
 }
-pub fn stringify_partialslp(p_slp: &PartialSLP) -> String {
+fn stringify_partialslp(p_slp: &PartialSLP) -> String {
     p_slp.iter().enumerate().map(|(i,l)| "L".to_string() + i.to_string().as_str() + ": " + stringify_partialslpline(l).as_str() )
         .collect::<Vec<String>>().join("\n")
 }
@@ -139,7 +139,7 @@ fn transform_x_i_plus(s1: &SLPVar, s2: &SLPVar, vi: &TMatrix, partial_program: &
         if vi_is_zero {
             partial_program.push( Compound(( Coeff(c2), Plus, LineToTranslate((vi.clone(), n)) )) );
         } else {
-            partial_program.push( Jump( (vi.clone(), n) ) ); 
+            partial_program.push( Jump( LineToTranslate((vi.clone(), n)) ) ); 
         }
         add_matrix_to_lines_to_parse(n, vi.clone(), lines_to_parse);
     }
@@ -147,7 +147,7 @@ fn transform_x_i_plus(s1: &SLPVar, s2: &SLPVar, vi: &TMatrix, partial_program: &
         if vi_is_zero {
             partial_program.push( Compound(( Coeff(c2), Plus, LineToTranslate((vi.clone(), n)) )) );
         } else {
-            partial_program.push( Jump( (vi.clone(), n) ) ); 
+            partial_program.push( Jump( LineToTranslate((vi.clone(), n)) ) ); 
         }
         add_matrix_to_lines_to_parse(n, vi.clone(), lines_to_parse);
     }
@@ -159,7 +159,6 @@ fn transform_x_i_plus(s1: &SLPVar, s2: &SLPVar, vi: &TMatrix, partial_program: &
 }
 
 use std::cmp::min;
-use std::fmt::format;
 use std::iter::zip;
 
 fn get_all_subvecs_i(v: &[u32], i: u32) -> Vec<TMatrix> {
@@ -192,16 +191,16 @@ fn transform_x_i_mult(s1: &SLPVar, s2: &SLPVar, vi: &TMatrix, partial_program: &
     match (s1,s2) {
         (&F(_),&F(_)) => partial_program.push( PartialSLPLine::Zero ),
         (&F(_),&L(n)) => {
-            partial_program.push( PartialSLPLine::Jump((vi.clone(), n)) );
+            partial_program.push( PartialSLPLine::Jump( LineToTranslate((vi.clone(), n)) ) ); 
             add_matrix_to_lines_to_parse(n, vi.clone(), lines_to_parse);
         },
         (&L(n),&F(_)) => {
-            partial_program.push( PartialSLPLine::Jump((vi.clone(), n)) );
+            partial_program.push( PartialSLPLine::Jump( LineToTranslate((vi.clone(), n)) ) ); 
             add_matrix_to_lines_to_parse(n, vi.clone(), lines_to_parse);
         },
         (&L(n1),&L(n2)) => {
-            let subvecs = get_all_subvecs(vi);
-            println!("subvecs: {subvecs:?}");
+            // let subvecs = get_all_subvecs(vi);
+            // println!("subvecs: {subvecs:?}");
             for (i,v_small) in get_all_subvecs(vi).into_iter().enumerate().rev() {
 
                 let v_small_minus:TMatrix = zip(vi,&v_small).map(|(i,j)| i-j).collect();
@@ -225,6 +224,50 @@ fn insert_into_line_ref(line_ref: &mut LineMapper, lno: usize, tm: TMatrix, val:
         let tm_map: HashMap<TMatrix, usize> = HashMap::from([(tm,val)]);
         line_ref.insert(lno, tm_map);
     }
+}
+
+// Result will fail if we still have variables that are LineToTranslate or MetavarRef
+// in the partial slp
+fn translate_partial_to_slp_cheat(program: PartialSLP) -> Option<SLP> {
+    use PartialSLPLine::*;
+    use PartialSLPVar::*;
+
+    use SLPLine as SL;
+    use SLPVar as SV;
+
+    use Operation::*;
+    
+    let mut slp: SLP = Vec::new();
+    for line in program {
+        match line {
+            Zero => slp.push(SL::Compound( (SV::F(Complex64::ZERO), Plus, SV::F(Complex64::ZERO)) )),
+            Input(m) => slp.push( SL::Input(m)),
+            Compound((s1, op, s2)) => {
+                let v1;
+                let v2;
+                if let LineInProgram(n1)=s1 && let LineInProgram(n2)=s2 {
+                    v1 = SV::L(n1); v2 = SV::L(n2);
+                } else if let LineInProgram(n1)=s1 && let Coeff(c)=s2 {
+                    v1 = SV::L(n1); v2 = SV::F(c);
+                } else if let Coeff(c)=s1 && let LineInProgram(n2)=s2 {
+                    v1 = SV::F(c); v2 = SV::L(n2);
+                } else if let Coeff(c1)=s1 && let Coeff(c2)=s2 {
+                    v1 = SV::F(c1); v2 = SV::F(c2);
+                } else { return None;}
+                slp.push(SL::Compound((v1, op, v2)));
+            },
+            Jump(s) => {
+                let v;
+                match s {
+                    LineInProgram(n) => v = SV::L(n),
+                    Coeff(c) => v = SV::F(c),
+                    _ => return None,
+                }
+                slp.push(SL::Compound(( SV::F(Complex64::ZERO), Plus, v )));
+            }
+        }
+    }
+    return Some(slp);
 }
 
 pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
@@ -254,10 +297,10 @@ pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
         }
     }
 
-    println!("metavars_used: {metavars_used:?}");
-    println!("line_ref: {line_ref:?}");
-    println!("line_parser: {line_parser:?}");
-    println!("p_program: {p_program:?}");
+    // println!("metavars_used: {metavars_used:?}");
+    // println!("line_ref: {line_ref:?}");
+    // println!("line_parser: {line_parser:?}");
+    // println!("p_program: {p_program:?}");
 
 
     // Reverse all line reference values so they now point to where they will be in the list once reversed
@@ -295,8 +338,6 @@ pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
     // 4. Apply a zero reduction algorithm to clear the amount of zeros that will probably clog up the output
     // 5. Convert the partial program (now only using inputs, zeros and compounds using coeffs and line references) into a program
 
-    // step 1 (ignored until multiplication implemented)
-
     // step 2 & 3
     for line in p_program.iter_mut() {
         if let PartialSLPLine::Compound((s1, op, s2)) = line {
@@ -316,12 +357,10 @@ pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
             *line = PartialSLPLine::Compound((s1, *op, s2));
         }
     }
-
-    
-    println!("Modified partial program:\n{}", stringify_partialslp(&p_program));
+    // println!("Modified partial program:\n{}", stringify_partialslp(&p_program));
 
 
-    None
+    return translate_partial_to_slp_cheat(p_program);
 }
 
 #[cfg(test)]

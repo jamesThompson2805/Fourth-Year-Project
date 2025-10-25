@@ -4,7 +4,7 @@ mod transformations;
 
 use std::fs;
 
-use crate::transformations::transform_x_i_program;
+use crate::{straight_line_program::stringify_slp, transformations::transform_x_i_program};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let contents = fs::read_to_string("input.txt")
@@ -16,7 +16,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(slp) => {
         println!("gathered output: {slp:?}");
         println!();
-        transform_x_i_program(&slp, &vec![0,0,1,0,0,0,0,0,0]);
+        let maybe_slp = transform_x_i_program(&slp, &vec![1,0,2,0,0,0,0,0,0]);
+        if let Some(slp) = maybe_slp {
+            println!("Success, received SLP:\n{}", stringify_slp(&slp));
+        }
     },
 
     Err(s) => println!("ERROR IN PARSING: \n{s}"),
