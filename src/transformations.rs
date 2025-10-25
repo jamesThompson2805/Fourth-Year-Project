@@ -357,6 +357,11 @@ pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
             *line = PartialSLPLine::Compound((s1, *op, s2));
         }
     }
+    for line in p_program.iter_mut() {
+        if let PartialSLPLine::Jump(PartialSLPVar::LineToTranslate((tm,n))) = line {
+            *line = PartialSLPLine::Jump(PartialSLPVar::LineInProgram( line_ref[n][tm] ));
+        }
+    }
     // println!("Modified partial program:\n{}", stringify_partialslp(&p_program));
 
 
