@@ -37,3 +37,57 @@ pub fn stringify_slp(p_slp: &SLP) -> String {
     p_slp.iter().enumerate().map(|(i,l)| "L".to_string() + i.to_string().as_str() + ": " + stringify_slpline(l).as_str() )
         .collect::<Vec<String>>().join("\n")
 }
+
+use std::collections::BTreeMap;
+type MetaMonomial = BTreeMap<MetaVar, u64>;
+type MetaPolynomial = BTreeMap<MetaMonomial, Complex64>;
+
+fn create_coeff(c: &Complex64) -> MetaPolynomial {
+    BTreeMap::from([( BTreeMap::from([(Vec::new(),1)]), *c )])
+}
+
+fn evaluate_plus( s1: &SLPVar, s2: &SLPVar, so_far: &Vec<Option<MetaPolynomial>>) -> Option<MetaPolynomial> {
+    use SLPVar::*;
+    let mp_1 = match s1 {
+        L(n) => so_far[*n].clone(),
+        F(c) => create_coeff(c),
+    };
+    let mut mp_2 = match s2 {
+        L(n) => so_far[*n].clone(),
+        F(c) => create_coeff(c),
+    };
+    let mut mp: MetaPolynomial = BTreeMap::new();
+    for (k,v) in mp_1 {
+        if mp_2.contains_key(&k) {
+            let v_new = v + mp_2[&k];
+            mp_2.remove(&k);
+            mp.insert(k, v_new);
+        } else {
+            mp.insert(k,v);
+        }
+    }
+    for (k,v) in mp_2 {
+        mp.insert(k,v);
+    }
+    mp
+}
+
+pub fn evaluate_slp(slp: &SLP) -> String {
+    use SLPLine::*;
+    use Operation::*;
+    let mut mp_v: Vec<Option<MetaPolynomial>> = Vec::new();
+    for line in slp {
+        let mp = match line {
+                Input(m) => {
+                    let mm:MetaMonomial = BTreeMap::from([(m.clone(),1)]);
+                    Some(BTreeMap::from( [(mm, Complex64::ONE)] ))
+                },
+                Compound((s1,Plus, s2)) => ,
+                Compound((s1,Mult, s2)) => ,
+
+        };
+        mp_v.push(mp);
+        
+    }
+    unimplemented!()
+}

@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(slp) => {
         println!("gathered output: {slp:?}");
         println!();
-        let maybe_slp = transform_x_i_program(&slp, &vec![1,0,2,0,0,0,0,0,0]);
+        let maybe_slp = transform_x_i_program(&slp, &vec![3,0,0,3,0,0,3,0,0]);
         if let Some(slp) = maybe_slp {
             println!("Success, received SLP:\n{}", stringify_slp(&slp));
         }
