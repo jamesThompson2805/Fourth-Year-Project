@@ -38,6 +38,34 @@ pub fn stringify_slp(p_slp: &SLP) -> String {
         .collect::<Vec<String>>().join("\n")
 }
 
+/*
+    sum_slp takes two slp, adds second to first, adds line to first to sum the slp and wipes second
+    does not apply any logic to ensuring no duplication, may duplicate metavariable definition
+ */
+pub fn add_slp(slp1: &mut SLP, slp2: &mut SLP) {
+    use SLPLine::*;
+    use SLPVar::*;
+    use Operation::*;
+    let len1 = slp1.len();
+    let len2 = slp2.len();
+    slp1.append(slp2);
+    slp1.push(
+        Compound(( L(len1 - 1), Plus, L(len1 + len2 - 1)))
+    );
+}
+pub fn mult_slp(slp1: &mut SLP, slp2: &mut SLP) {
+    use SLPLine::*;
+    use SLPVar::*;
+    use Operation::*;
+    let len1 = slp1.len();
+    let len2 = slp2.len();
+    slp1.append(slp2);
+    slp1.push(
+        Compound(( L(len1 - 1), Mult, L(len1 + len2 - 1)))
+    );
+}
+
+/* 
 use std::collections::BTreeMap;
 type MetaMonomial = BTreeMap<MetaVar, u64>;
 type MetaPolynomial = BTreeMap<MetaMonomial, Complex64>;
@@ -69,7 +97,7 @@ fn evaluate_plus( s1: &SLPVar, s2: &SLPVar, so_far: &Vec<Option<MetaPolynomial>>
     for (k,v) in mp_2 {
         mp.insert(k,v);
     }
-    mp
+    unimplemented!()
 }
 
 pub fn evaluate_slp(slp: &SLP) -> String {
@@ -91,3 +119,4 @@ pub fn evaluate_slp(slp: &SLP) -> String {
     }
     unimplemented!()
 }
+*/

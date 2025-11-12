@@ -18,7 +18,7 @@ fn save_input_to_output(vi: &Vec::<u32>,out_name: String) -> Result<(), Box<dyn 
     Ok(slp) => {
         println!("gathered output: {slp:?}");
         println!();
-        let maybe_slp = transform_x_i_program(&slp, &vec![1,0,2,0,0,0,0,0,0]);
+        let maybe_slp = transform_x_i_program(&slp, vi);
         if let Some(res_slp) = maybe_slp {
             println!("Success, received SLP");
             let path = out_name+".txt";
@@ -32,7 +32,7 @@ fn save_input_to_output(vi: &Vec::<u32>,out_name: String) -> Result<(), Box<dyn 
    Ok(())
 }
 
-fn print_input_to_output(vi: &Vec::<u32>,out_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn print_input_to_output(vi: &Vec::<u32>) -> Result<(), Box<dyn std::error::Error>> {
     let contents = fs::read_to_string("input.txt")
         .expect("Should have been able to read the file");
 
@@ -42,7 +42,7 @@ fn print_input_to_output(vi: &Vec::<u32>,out_name: &str) -> Result<(), Box<dyn s
     Ok(slp) => {
         println!("gathered output: {slp:?}");
         println!();
-        let maybe_slp = transform_x_i_program(&slp, &vec![3,0,0,3,0,0,3,0,0]);
+        let maybe_slp = transform_x_i_program(&slp, vi);
         if let Some(slp) = maybe_slp {
             println!("Success, received SLP:\n{}", stringify_slp(&slp));
         }
@@ -55,6 +55,6 @@ fn print_input_to_output(vi: &Vec::<u32>,out_name: &str) -> Result<(), Box<dyn s
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let vi = vec![1,0,2,0,0,0,0,0,0];
-    save_input_to_output(&vi, "example_single_multiplication".to_string())
+    let vi = vec![3,0,0,3,0,0,3,0,0];
+    save_input_to_output(&vi,"example_5_4".to_string())
 }
