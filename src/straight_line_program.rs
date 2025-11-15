@@ -65,6 +65,16 @@ pub fn mult_slp(slp1: &mut SLP, slp2: &mut SLP) {
     );
 }
 
+pub fn scale_slp(slp: &mut SLP, c: Complex64) {
+    use SLPLine::*;
+    use SLPVar::*;
+    use Operation::*;
+    let len1 = slp.len();
+    slp.push(
+        Compound(( L(len1 - 1), Mult, F(c)))
+    );
+}
+
 /* 
 use std::collections::BTreeMap;
 type MetaMonomial = BTreeMap<MetaVar, u64>;

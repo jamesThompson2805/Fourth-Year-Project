@@ -64,6 +64,7 @@ fn line_parser(input:&str) -> IResult<&str, SLPLine> {
 
 use nom::Err as Err2;
 
+// TODO : Enforce that the metavars all have the same length list and return that length
 pub fn file_parser(input: &str) -> Result<SLP,String> {
     let mut program: SLP = Vec::new();
     for (l_no,line) in input.split('\n').enumerate() {
