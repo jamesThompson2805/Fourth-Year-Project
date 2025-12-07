@@ -1,6 +1,7 @@
 mod straight_line_program;
 mod parsing;
 mod transformations;
+mod projections;
 
 use std::fs;
 use std::fs::File;
