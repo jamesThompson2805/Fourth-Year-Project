@@ -2,6 +2,7 @@ mod straight_line_program;
 mod parsing;
 mod transformations;
 mod projections;
+mod metapolynomials;
 
 use std::fs;
 use std::fs::File;
