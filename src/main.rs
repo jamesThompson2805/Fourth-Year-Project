@@ -6,7 +6,7 @@ mod metapolynomials;
 
 use std::fs;
 use std::fs::File;
-use std::io::{Error, Write};
+use std::io::Write;
 
 use crate::{straight_line_program::stringify_slp, transformations::transform_x_i_program};
 
@@ -57,6 +57,15 @@ fn print_input_to_output(vi: &Vec::<u32>) -> Result<(), Box<dyn std::error::Erro
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let vi = vec![3,0,0,3,0,0,3,0,0];
-    save_input_to_output(&vi,"example_5_4".to_string())
+    let proj = vec![6,0,0];
+    let contents = fs::read_to_string("input.txt")
+        .expect("Should have been able to read the file");
+    let slp = parsing::file_parser(&contents)?;
+
+    println!("============= INPUT ===========\n{}", stringify_slp(&slp));
+    let projected = projections::apply_projection_to_slp(slp, &proj).ok_or("bad")?;
+    println!("============= PROJECTED =======\n{}", stringify_slp(&projected));
+
+    Ok(())
+    
 }

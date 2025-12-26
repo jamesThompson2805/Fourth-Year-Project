@@ -1,3 +1,9 @@
+use super::straight_line_program::SLP;
+use super::straight_line_program::{add_slp, mult_slp, scale_slp};
+use super::straight_line_program::stringify_slp;
+
+use super::transformations::transform_x_i_product_program;
+
 // Lie Algebra sum and products of the Eij matrices
 type LASum<T> = Vec<T>;
 type LAProd<T> = Vec<T>;
@@ -8,7 +14,7 @@ fn find_casimir(p: usize, k: usize) -> LASum<LAProd<(usize, usize)>> {
     let mut cycles = Vec::new();
     while !q.is_empty() {
         let str = q.remove(0);
-        for i in 0..k {
+        for i in 0..k-1 {
             let mut str_clone = str.clone();
             str_clone.push(i);
             if str_clone.len() == p {
@@ -31,6 +37,7 @@ fn find_casimir(p: usize, k: usize) -> LASum<LAProd<(usize, usize)>> {
 }
 
 use nalgebra::DMatrix;
+use num_complex::Complex64;
 fn casimir_eigenval(casimir_num: u32, lambda: &Vec<u32>, k: usize) -> f64 {
     let a = DMatrix::<f64>::from_fn(k, k, |i, j| {
         if i==j {
@@ -118,6 +125,61 @@ fn partitions_n_le_m( n: usize, m: usize) -> Vec<Vec<u32>> {
         parts.extend(parts_len_lm.into_iter());
     }
     parts
+}
+
+pub fn apply_projection_to_slp(slp: SLP, projection: &Vec<u32>) -> Option<SLP> {
+    let distinguishing_partitions = find_distinguishing_parts_and_indices(projection);
+    distinguishing_partitions.iter().for_each(|(part, el_index)| {
+        println!("Found part {part:?}, with casimir el index: {el_index}");
+    });
+    
+    let k = projection.len();
+    let mut slp_product: Vec<SLP> = vec![];
+    for (part, el_index) in distinguishing_partitions {
+        let mut slp_term1 = slp.clone();    
+        let mut slp_term2 = slp.clone();
+
+        // apply U_{mu}
+        let eij_sum_of_products = find_casimir(el_index, k);
+        println!("Casimir found: {eij_sum_of_products:?}, index: {el_index}");
+        let mut slp_term1_entries: Vec<SLP> = vec![];
+        for eij_prod in  eij_sum_of_products {
+            let transformed: Option<SLP> = transform_x_i_product_program(&slp_term1, &eij_prod, k);
+            match transformed {
+                Some(transform_slp) => slp_term1_entries.push(transform_slp),
+                None => {
+                    println!("Failure for projection {part:?} SLP:\n{}", stringify_slp(&slp_term1));
+                }
+            }
+        }
+        if slp_term1_entries.len() == 0 {
+            continue;
+        }
+        slp_term1 = slp_term1_entries[0].clone();
+        for i in 1..slp_term1_entries.len() {
+            add_slp(&mut slp_term1, &mut slp_term1_entries[i]);
+        }
+
+        // transform term2 by chi_{mu}
+        scale_slp(&mut slp_term2, 
+            Complex64::new(-1.0*casimir_eigenval(el_index as u32, &part, k) , 0.0)
+        );
+
+        add_slp(&mut slp_term1, &mut slp_term2);
+        scale_slp(&mut slp_term1, Complex64::new(
+            casimir_eigenval(el_index as u32, projection, k)
+             - casimir_eigenval(el_index as u32, &part, k)
+             , 0.0
+        ));
+
+        slp_product.push(slp_term1);
+    }
+
+    let mut slp_proj = slp_product[0].clone();
+    for i in 1..slp_product.len() {
+        mult_slp(&mut slp_proj, &mut slp_product[i]);
+    }
+    Some(slp_proj)
 }
 
 

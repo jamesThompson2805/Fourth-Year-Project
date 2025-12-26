@@ -59,7 +59,7 @@ fn stringify_partialslp(p_slp: &PartialSLP) -> String {
 
 
 // WE APPLY CONVENTION OF INDEX 0 HERE
-pub fn apply_e_ij_input(m: &MetaVar, i: usize, j: usize) -> Option<(MetaVar, Complex64)> {
+pub fn apply_e_ij(m: &MetaVar, i: usize, j: usize) -> Option<(MetaVar, Complex64)> {
     if i >= m.len() || j >= m.len() { return None; }
     
     if m[j] == 0 { return None; }
@@ -86,7 +86,7 @@ fn apply_x_i_input(m: &MetaVar, vi: &TMatrix, metavar_refs: &mut MetaVarSet) -> 
     for i in 0..m.len() {
         for j in 0..m.len() {
             for _ in 0..vi[i*m.len() + j] {
-                let (m,c) = apply_e_ij_input(&meta, i, j)?;
+                let (m,c) = apply_e_ij(&meta, i, j)?;
                 meta = m;
                 coeff *= c;
             }
@@ -335,8 +335,8 @@ pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
     // 1. Translate all line references in the partial program to be in the right place
     // 2. Translate all (Matrix, LineNumber) references to be the correct line in the program
     // 3. Translate all references to metavariables to be the correct line in the program
-    // 4. Apply a zero reduction algorithm to clear the amount of zeros that will probably clog up the output
-    // 5. Convert the partial program (now only using inputs, zeros and compounds using coeffs and line references) into a program
+    // 4. Apply a zero reduction algorithm to clear the amount of zeros that will probably clog up the output (not done)
+    // 5. Convert the partial program (now only using inputs, zeros and compounds using coeffs and line references) into a program (done without cleanup)
 
     // step 2 & 3
     for line in p_program.iter_mut() {
@@ -357,24 +357,24 @@ pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
             *line = PartialSLPLine::Compound((s1, *op, s2));
         }
     }
-    for line in p_program.iter_mut() {
-        if let PartialSLPLine::Jump(PartialSLPVar::LineToTranslate((tm,n))) = line {
-            *line = PartialSLPLine::Jump(PartialSLPVar::LineInProgram( line_ref[n][tm] ));
-        }
-    }
     // println!("Modified partial program:\n{}", stringify_partialslp(&p_program));
 
 
-    return translate_partial_to_slp_cheat(p_program);
-}
-
-pub fn transform_e_ij_program(init_program: &SLP, i: usize, j: usize, metavar_len: usize) -> Option<SLP> {
-    let mut vi: Vec<u32>= (0..metavar_len*metavar_len).map(|x| { 0 }).collect();
-    vi[i * metavar_len + j] = 1;
-    transform_x_i_program(init_program, &vi)
+    translate_partial_to_slp_cheat(p_program)
 }
 
 
+pub fn transform_x_i_product_program(init_program: &SLP, eij_s: &Vec<(usize, usize)>, k: usize) -> Option<SLP> {
+    use SLPLine::*;
+    use SLPVar::*;
+    let mut slp: SLP = init_program.clone();
+    for (i,j) in eij_s {
+        let mut vi = vec![0;k*k];
+        vi[i * k + j] = 1;
+        slp = transform_x_i_program(&slp, &vi)?;
+    }
+    Some(slp)
+}
 
 #[cfg(test)]
 mod tests {

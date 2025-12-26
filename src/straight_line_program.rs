@@ -11,7 +11,7 @@ pub enum SLPVar { L(LineVar), F(Complex64) }
 #[derive(Debug, Clone, Copy)]
 pub enum Operation { Plus, Mult, }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SLPLine {
     Input(MetaVar),
     Compound((SLPVar, Operation, SLPVar)),
@@ -73,6 +73,39 @@ pub fn scale_slp(slp: &mut SLP, c: Complex64) {
     slp.push(
         Compound(( L(len1 - 1), Mult, F(c)))
     );
+}
+
+use std::collections::HashMap;
+pub fn eval_slp_at_point(input_vals: &HashMap<MetaVar, f64>, slp: &SLP) -> Option<Complex64> {
+    use SLPLine::*;
+    use SLPVar::*;
+    use Operation::*;
+    let mut line_evals: Vec<Complex64> = vec![];
+    for line in slp {
+        match line {
+            Input(m) => {
+                if input_vals.contains_key(m) {
+                    line_evals.push(Complex64::new(input_vals[m], 0.0));
+                } else {
+                    return None;
+                }
+            },
+            Compound((s1, op, s2)) => {
+                let s1_val = match s1 { F(c) => c, L(n) => &line_evals[*n]};
+                let s2_val = match s2 { F(c) => c, L(n) => &line_evals[*n]};
+
+                match op {
+                    Plus => line_evals.push( *s1_val + *s2_val),
+                    Mult => line_evals.push( *s1_val * *s2_val),
+                }
+            },
+        }
+    }
+    line_evals.last().copied()
+}
+
+pub fn are_slps_similar(input_vals: &HashMap<MetaVar, f64>, slp1: &SLP, slp2: &SLP) -> bool {
+    eval_slp_at_point(input_vals, slp1) == eval_slp_at_point(input_vals, slp2)
 }
 
 /* 
