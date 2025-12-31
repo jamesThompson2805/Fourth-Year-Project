@@ -1,9 +1,11 @@
 mod straight_line_program;
 mod parsing;
-mod transformations;
-mod projections;
-mod metapolynomials;
+//mod transformations;
+mod transformations2;
+mod evaluation;
+//mod projections;
 
+/*
 use std::fs;
 use std::fs::File;
 use std::io::Write;
@@ -55,17 +57,8 @@ fn print_input_to_output(vi: &Vec::<u32>) -> Result<(), Box<dyn std::error::Erro
 
     Ok(())
 }
+    */
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let proj = vec![6,0,0];
-    let contents = fs::read_to_string("input.txt")
-        .expect("Should have been able to read the file");
-    let slp = parsing::file_parser(&contents)?;
-
-    println!("============= INPUT ===========\n{}", stringify_slp(&slp));
-    let projected = projections::apply_projection_to_slp(slp, &proj).ok_or("bad")?;
-    println!("============= PROJECTED =======\n{}", stringify_slp(&projected));
-
     Ok(())
-    
 }

@@ -109,8 +109,8 @@ fn transform_x_i_input(m: &MetaVar, vi: &TMatrix, metavar_refs: &mut MetaVarSet,
 }
 
 fn add_matrix_to_lines_to_parse(line: LineVar, vi: TMatrix, lines_to_parse: &mut LinesToParse) {
-    if let Some(hm) = lines_to_parse.get_mut(&line) {
-        hm.insert( vi );
+    if let Some(hs) = lines_to_parse.get_mut(&line) {
+        hs.insert( vi );
     } else {
         lines_to_parse.insert(line, HashSet::from([vi]) );
     }
@@ -253,7 +253,7 @@ fn translate_partial_to_slp_cheat(program: PartialSLP) -> Option<SLP> {
                     v1 = SV::F(c); v2 = SV::L(n2);
                 } else if let Coeff(c1)=s1 && let Coeff(c2)=s2 {
                     v1 = SV::F(c1); v2 = SV::F(c2);
-                } else { return None;}
+                } else { println!("returning None"); return None;}
                 slp.push(SL::Compound((v1, op, v2)));
             },
             Jump(s) => {
@@ -261,7 +261,7 @@ fn translate_partial_to_slp_cheat(program: PartialSLP) -> Option<SLP> {
                 match s {
                     LineInProgram(n) => v = SV::L(n),
                     Coeff(c) => v = SV::F(c),
-                    _ => return None,
+                    _ => { println!("crashing bc {}", stringify_partialslpvar(&s));return None;},
                 }
                 slp.push(SL::Compound(( SV::F(Complex64::ZERO), Plus, v )));
             }
@@ -297,10 +297,10 @@ pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
         }
     }
 
-    // println!("metavars_used: {metavars_used:?}");
-    // println!("line_ref: {line_ref:?}");
-    // println!("line_parser: {line_parser:?}");
-    // println!("p_program: {p_program:?}");
+    // println!("metavars_used: {metavars_used:}");
+    // println!("line_ref: {line_ref:}");
+    // println!("line_parser: {line_parser:}");
+    // println!("p_program: {p_program:}");
 
 
     // Reverse all line reference values so they now point to where they will be in the list once reversed
