@@ -104,7 +104,7 @@ fn apply_eij_on_metavar(m: &MetaVar, eij: (usize, usize)) -> Option<(u32,MetaVar
 /// p_slp is the partial slp structure being built to be converted into a slp, it is being built backwards
 /// line_map is a dictionary mapping original line numbers and to their current index in the partial slp structure
 /// u32_to_c is a conversion function to allow the coefficients from the metavar to be included in the program, a sensible definition should have u32_to_c(0) == T::default()
-fn apply_eij_on_input_line<T>(m: &MetaVar, lno: usize, eij:(usize, usize), p_slp: &mut PartialSLP<T>, line_map: &mut LineMap, u32_to_c: fn(u32) -> T) {
+fn apply_eij_on_input_line<T,F: Fn(u32)->T>(m: &MetaVar, lno: usize, eij:(usize, usize), p_slp: &mut PartialSLP<T>, line_map: &mut LineMap, u32_to_c: F) {
     use PartialSLPVar::*;
     use PartialSLPLine::*;
     use Operation::*;
@@ -205,7 +205,11 @@ fn apply_eij_on_product<T: Clone>(v1: &SLPVar<T>, v2: &SLPVar<T>, lno: usize, p_
 /// p_slp is the partial slp structure being built to be converted into a slp, it is being built backwards
 /// lines_to_trans is a dictionary of other lines that also need to be included into the partial slp
 /// line_map is a dictionary mapping original line numbers and to their current index in the partial slp structure
-fn apply_eij_to_line<T: Clone>(line: &SLPLine<T>, lno: usize, eij: (usize,usize), p_slp: &mut PartialSLP<T>, lines_to_trans: &mut LinesToTransform, line_map: &mut LineMap, u32_to_c: fn(u32) -> T) {
+fn apply_eij_to_line<T, F>(line: &SLPLine<T>, lno: usize, eij: (usize,usize), p_slp: &mut PartialSLP<T>, lines_to_trans: &mut LinesToTransform, line_map: &mut LineMap, u32_to_c: F)
+where
+    T: Clone,
+    F: Fn(u32) -> T,
+{
     use SLPLine::*;
     use Operation::*;
     match line {
@@ -251,7 +255,11 @@ fn include_line_from_slp<T: Clone>(line: &SLPLine<T>, lno: usize, p_slp: &mut Pa
 /// eij is the transformation
 /// u32_to_c is a function converting a u32 to the custom coefficient type T, ensure that u32_to_c(0) is sensible (ie. is 0 in your vector field)
 /// returns result of slp or error message about failure
-fn apply_eij_on_program<T: Clone>(slp: &SLP<T>, eij: (usize, usize), u32_to_c: fn(u32) -> T) -> Result<SLP<T>,&'static str> {
+pub fn apply_eij_on_program<T, F>(slp: &SLP<T>, eij: (usize, usize), u32_to_c: F) -> Result<SLP<T>,&'static str>
+where
+    T: Clone,
+    F: Fn(u32)->T + Copy,
+{
     use PartialSLPLine::*;
     use PartialSLPVar::*;
     use Operation::*;
@@ -351,8 +359,14 @@ fn apply_eij_on_program<T: Clone>(slp: &SLP<T>, eij: (usize, usize), u32_to_c: f
 /// eijs is the vector of transformations, to be applied in order of last to first
 /// u32_to_c is a function converting a u32 to the custom coefficient type T, ensure that u32_to_c(0) is sensible (ie. is 0 in your vector field)
 /// returns result of slp or error message about first failure
-fn apply_eijs_on_program<T: Clone>(slp: &SLP<T>, eijs: Vec<(usize, usize)>, u32_to_c: fn(u32) -> T) -> Result<SLP<T>,&'static str> {
-    eijs.iter().try_fold(slp.clone(), |s, &eij| apply_eij_on_program(&s, eij, u32_to_c))
+pub fn apply_eijs_on_program<T, F>(slp: &SLP<T>, eijs: &Vec<(usize, usize)>, u32_to_c: F) -> Result<SLP<T>,String>
+where
+    T: Clone,
+    F: Fn(u32) -> T + Copy,
+{
+    eijs.iter().enumerate().rev().try_fold(slp.clone()
+    , |s, (i, &eij)| apply_eij_on_program(&s, eij, u32_to_c).map_err(|s| format!("Failure index {i}, Error: {s}"))
+    )
 }
 
 #[cfg(test)]

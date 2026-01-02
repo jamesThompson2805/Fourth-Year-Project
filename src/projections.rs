@@ -1,13 +1,17 @@
+//! projections.rs contains functions to achieve the projection of a slp to a lambda-isotypic space
+#![allow(dead_code)]
+use std::fmt::Display;
+
 use super::straight_line_program::SLP;
-use super::straight_line_program::{add_slp, mult_slp, scale_slp};
+use super::straight_line_program::{add_slp, scale_slp};
 use super::straight_line_program::stringify_slp;
 
-use super::transformations::transform_x_i_product_program;
-
-// Lie Algebra sum and products of the Eij matrices
+/// LASum wraps a vector denoting a collection of terms to be summed together
 type LASum<T> = Vec<T>;
+/// LAProd wraps a vector denoting a collection of terms to be multiplied together
 type LAProd<T> = Vec<T>;
 
+/// find casimir finds the pth casimir element for the casimir elements of k variables
 fn find_casimir(p: usize, k: usize) -> LASum<LAProd<(usize, usize)>> {
     let mut q = Vec::new();
     q.push(Vec::new());
@@ -37,23 +41,30 @@ fn find_casimir(p: usize, k: usize) -> LASum<LAProd<(usize, usize)>> {
 }
 
 use nalgebra::DMatrix;
-use num_complex::Complex64;
-fn casimir_eigenval(casimir_num: u32, lambda: &Vec<u32>, k: usize) -> f64 {
-    let a = DMatrix::<f64>::from_fn(k, k, |i, j| {
+/// casimir_eigenval finds an eigenvalue of a casimir element wrt partition lambda, given by p, the index of the casimir number
+/// casimir_num is the index of the casimir number
+/// lambda is the partition to find the eigenvalue with respect to
+/// k is the number of variables of the metapolynomial, and the length of the partition and the 
+fn casimir_eigenval(casimir_num: u32, lambda: &Vec<u32>, k: usize) -> i64 {
+    let a = DMatrix::<i64>::from_fn(k, k, |i, j| {
         if i==j {
-            lambda[i] as f64 + k as f64 - i as f64
+            lambda[i] as i64 + k as i64 - i as i64
         } else if i<j {
-            -1.
+            -1
         } else {
-            0.
+            0
         }
     });
     let a_pow_p = a.pow(casimir_num);
-    let e = DMatrix::<f64>::from_element(k, k, 1.);
+    let e = DMatrix::<i64>::from_element(k, k, 1);
 
     (a_pow_p * e).trace()
 }
 
+/// find_distinguishing_casimir_index finds the index of a casimir element that has a different eigenvalue for the two partitions provided
+/// new_partition is the first partition
+/// proj_partitions is the other partition
+/// returns an Option of a usize as it may be the case that there doesn't exist a distinguishing casimir element (occurring when we choose partitions that aren't highest weight)
 fn find_distinguishing_casimir_index(new_partition: &Vec<u32>, proj_partition: &Vec<u32>) -> Option<usize> {
     let k = new_partition.len();
     for p in 1..=k {
@@ -64,6 +75,9 @@ fn find_distinguishing_casimir_index(new_partition: &Vec<u32>, proj_partition: &
     None
 }
 
+/// find_distinguishing_parts_and_indices attempts to finds all other partitions that can be distinguished by some casimir element
+/// proj_part is a partition
+/// returns a vector of every other partition of the same length and the index of the distinguishing casimir element
 fn find_distinguishing_parts_and_indices(proj_part: &Vec<u32>) -> Vec<(Vec<u32>, usize)> {
     let k = proj_part.len();
     let n: usize = proj_part.iter().sum::<u32>().try_into().unwrap();
@@ -73,7 +87,8 @@ fn find_distinguishing_parts_and_indices(proj_part: &Vec<u32>) -> Vec<(Vec<u32>,
                                     .collect()
 }
 
-// algorithm from pg 392 of knuth art of computer programming, combinatorial algorithms part 1
+/// partitions_n_m finds all partitions of n into exactly m parts
+///  algorithm from pg 392 of knuth art of computer programming, combinatorial algorithms part 1
 fn partitions_n_m(n: usize, m: usize) -> Vec<Vec<u32>> {
     let mut part = vec![1;m+1];
     let mut parts: Vec<Vec<u32>> = vec![];
@@ -117,6 +132,7 @@ fn partitions_n_m(n: usize, m: usize) -> Vec<Vec<u32>> {
     parts
 }
 
+/// partitions_n_le_m finds all partitions of n into m parts or fewer, each part is padded to a length of m
 fn partitions_n_le_m( n: usize, m: usize) -> Vec<Vec<u32>> {
     let mut parts: Vec<Vec<u32>> = vec![ vec![0;m]];
     parts[0][0] = n.try_into().unwrap();
@@ -127,59 +143,81 @@ fn partitions_n_le_m( n: usize, m: usize) -> Vec<Vec<u32>> {
     parts
 }
 
-pub fn apply_projection_to_slp(slp: SLP, projection: &Vec<u32>) -> Option<SLP> {
-    let distinguishing_partitions = find_distinguishing_parts_and_indices(projection);
-    distinguishing_partitions.iter().for_each(|(part, el_index)| {
-        println!("Found part {part:?}, with casimir el index: {el_index}");
+use super::transformations2::*;
+use std::ops::Mul;
+use std::ops::Div;
+use std::ops::Sub;
+/// apply_projection_to_slp applies the lambda projection to a slp
+/// the projection is defined as P_{\lambda} = \Pi_{\mu \in \Lambda, \mu \neq \lambda} {
+///     \frac{ U_{\mu} - \Chi_{\mu}(U_{\mu}) }{ \Chi_{\lambda}(U_{\mu}) - \Chi_{\mu}(U_{\mu}) }
+/// }
+/// 
+/// when evaluated on a metapolynomial, U_{\mu} is applied to the metapolynomial, a scale of the metapoly by \Chi_{\mu}(U_{\mu}) is subtracted
+///  and the result is scaled by the denominator. All terms are then summed.
+/// 
+/// slp is the slp to project
+/// lambda is the corresponding integer partition to project the slp to
+/// i64_to_c is a function converting integers into the coefficient object, it should be sensible wrt numerical operations and default, i64_to_c(0) = 0
+/// unit should be the multiplicative identity of the vector space being used for T
+/// returns a result of either the projected slp or an error message detailing the issue
+pub fn apply_projection_to_slp<T, F>(slp: SLP<T>, lambda: &Vec<u32>, i64_to_c: F, unit: T) -> Result<SLP<T>, String>
+where
+    T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T>,
+    F: Fn(i64) -> T,
+
+{
+    // steps of finding the projection:
+    // 1. Find all candidate partitions
+    // 2. for each partition, calculate its term in the product
+    //  2.1 calculate the projection under U_{\mu}
+    //  2.2 calculate the scale by -1 * \Chi_{\mu}(U_{\mu}) 
+    //  2.3 scale result by \Chi_{\lambda}(U_{\mu}) - \Chi_{\mu}(U_{\mu})
+    // 3. multiply all these terms together and return the resulting slp
+
+    let distinguishing_partitions = find_distinguishing_parts_and_indices(lambda);
+    distinguishing_partitions.iter().for_each(|(partition, el_index)| {
+        println!("Found partition {partition:?}, with casimir el index: {el_index}");
     });
     
-    let k = projection.len();
-    let mut slp_product: Vec<SLP> = vec![];
-    for (part, el_index) in distinguishing_partitions {
-        let mut slp_term1 = slp.clone();    
-        let mut slp_term2 = slp.clone();
+    let k = lambda.len();
+    let mut slp_product: LAProd<SLP<T>> = vec![];
+    for (mu, el_index) in distinguishing_partitions {
 
         // apply U_{mu}
-        let eij_sum_of_products = find_casimir(el_index, k);
-        println!("Casimir found: {eij_sum_of_products:?}, index: {el_index}");
-        let mut slp_term1_entries: Vec<SLP> = vec![];
-        for eij_prod in  eij_sum_of_products {
-            let transformed: Option<SLP> = transform_x_i_product_program(&slp_term1, &eij_prod, k);
-            match transformed {
-                Some(transform_slp) => slp_term1_entries.push(transform_slp),
-                None => {
-                    println!("Failure for projection {part:?} SLP:\n{}", stringify_slp(&slp_term1));
-                }
+        let mu_c = find_casimir(el_index, k); // find mu's casimir element (U_{\mu})
+        println!("Casimir found: {mu_c:?}, index: {el_index}");
+        // calculate each product of Eij in U{\mu}
+        let mut mu_c_slp_summands: LASum<SLP<T>> = vec![];
+        for eij_prod in  mu_c {
+            let transformed_res= apply_eijs_on_program(&slp, &eij_prod, |x| i64_to_c(x as i64));
+            match transformed_res {
+                Ok(transform_slp) => mu_c_slp_summands.push(transform_slp),
+                Err(s) => return Err( format!("Failure at partition {mu:?}, error{s}, SLP:\n{}", stringify_slp(&slp))),
             }
         }
-        if slp_term1_entries.len() == 0 {
+        if mu_c_slp_summands.len() == 0 {
             continue;
         }
-        slp_term1 = slp_term1_entries[0].clone();
-        for i in 1..slp_term1_entries.len() {
-            add_slp(&mut slp_term1, &mut slp_term1_entries[i]);
-        }
-
+        let first_el = mu_c_slp_summands[0].clone();
+        let mu_c_applied_slp = mu_c_slp_summands.into_iter().skip(1).fold(first_el, |acc, slp| add_slp(acc,slp));
+    
         // transform term2 by chi_{mu}
-        scale_slp(&mut slp_term2, 
-            Complex64::new(-1.0*casimir_eigenval(el_index as u32, &part, k) , 0.0)
-        );
+        let mut slp_chi_mu_scaled = slp.clone();
+        scale_slp(&mut slp_chi_mu_scaled, (T::default() - unit.clone()) * i64_to_c(casimir_eigenval(el_index as u32, &mu, k)) );
 
-        add_slp(&mut slp_term1, &mut slp_term2);
-        scale_slp(&mut slp_term1, Complex64::new(
-            casimir_eigenval(el_index as u32, projection, k)
-             - casimir_eigenval(el_index as u32, &part, k)
-             , 0.0
-        ));
+        let mut slp_prod_term = add_slp(mu_c_applied_slp, slp_chi_mu_scaled);
+        let scalar = unit.clone() / ( i64_to_c(casimir_eigenval(el_index as u32, lambda, k)) - i64_to_c(casimir_eigenval(el_index as u32, &mu, k)) );
+        scale_slp(&mut slp_prod_term, scalar);
 
-        slp_product.push(slp_term1);
+        slp_product.push(slp_prod_term);
     }
 
-    let mut slp_proj = slp_product[0].clone();
-    for i in 1..slp_product.len() {
-        mult_slp(&mut slp_proj, &mut slp_product[i]);
+    if slp_product.len() == 0 {
+        return Err(String::from("Every casimir failed"));
     }
-    Some(slp_proj)
+    let first_el = slp_product[0].clone();
+    let slp_proj = slp_product.into_iter().skip(1).fold(first_el, |acc, slp| add_slp(acc,slp));
+    Ok(slp_proj)
 }
 
 

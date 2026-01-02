@@ -3,7 +3,7 @@ mod parsing;
 //mod transformations;
 mod transformations2;
 mod evaluation;
-//mod projections;
+mod projections;
 
 /*
 use std::fs;

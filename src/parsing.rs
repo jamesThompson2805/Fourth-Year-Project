@@ -59,11 +59,22 @@ fn coeff_parser_complex(input: &str) -> IResult<&str, Complex64> {
 fn coeff_parser_real(input: &str) -> IResult<&str, f64> {
     float.parse(input).map(|(s,f)| (s,f as f64))
 }
+
+/// Parses rational coefficients into a rational number format, parses from float representation or fraction form
+fn coeff_parser_fraction(input: &str) -> IResult<&str, Rational64> {
+    map( (tag("("),dec32_parser, tag("/"), dec32_parser,tag(")")), |t| Rational64::new(t.1.into(), t.3.into())).parse(input)
+}
+
 /// Parses rational coefficients into a rational number format, parses from float representation so may be inaccuracy or failure
-fn coeff_parser_rational(input: &str) -> IResult<&str, Rational64> {
+fn coeff_parser_rational_from_float(input: &str) -> IResult<&str, Rational64> {
     map_res( coeff_parser_real, |f|
         Rational64::approximate_float(f).ok_or("Couldn't parse float as rational")
     ).parse(input)
+}
+
+/// Parses rational coefficients into a rational number format, parses from float representation or fraction form
+fn coeff_parser_rational(input: &str) -> IResult<&str, Rational64> {
+    alt((coeff_parser_fraction, coeff_parser_rational_from_float)).parse(input)
 }
 
 fn var_parser_complex(input: &str) -> IResult<&str, SLPVar<Complex64>> {
