@@ -190,3 +190,20 @@ pub fn slp_parser_rational(input: &str) -> Result<SLP<Rational64>,String> {
     }
     Ok(program)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::evaluation::are_rational_slp_similar;
+
+    #[test]
+    fn test_parsing_rationals() {
+        let slp_str = "=C<0,0,1>
+=L0*1.5";
+        let slp_str2 = "=C<0,0,1>
+=L0*(3/2)";
+        let slp1 = slp_parser_rational( slp_str ).unwrap();
+        let slp2 = slp_parser_rational( slp_str2 ).unwrap();
+        assert!(are_rational_slp_similar(&slp1, &slp2).1);
+    }
+}
