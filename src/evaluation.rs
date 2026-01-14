@@ -5,6 +5,14 @@ use super::straight_line_program::*;
 
 use rand::Rng;
 use rand::distr::Distribution;
+
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::ops::{Add,Mul};
+use std::fmt::Display;
+
+use num_rational::Rational64;
+use num_complex::Complex64;
 /// get_random_val_for_metavars is a function that generates a random point to evaluate a SLP at by generating a coefficient value for each metavariable
 /// T: The coefficient type
 /// D: The Generator object that takes the rng and converts it into a coefficient
@@ -23,9 +31,6 @@ where
     metavar_points
 }
 
-use std::collections::HashMap;
-use std::ops::Add;
-use std::ops::Mul;
 /// eval_slp_at_point takes a dictionary of metavariables and choice of value pairs and a SLP
 /// returns the evaluated SLP if the dictionary contains all necessary metavariables otherwise None
 pub fn eval_slp_at_point<T: Add<Output=T> + Mul<Output=T> + Copy>(input_vals: &HashMap<MetaVar, T>, slp: &SLP<T>) -> Option<T> {
@@ -55,7 +60,6 @@ pub fn are_slps_similar<T: Add<Output=T> + Mul<Output=T> + PartialEq + Copy>(inp
     eval_slp_at_point(input_vals, slp1) == eval_slp_at_point(input_vals, slp2)
 }
 
-use num_rational::Rational64;
 /// RationalDistr is a distribution for generating random rational numbers
 pub struct RationalDistr { }
 impl Distribution<Rational64> for RationalDistr {
@@ -65,7 +69,6 @@ impl Distribution<Rational64> for RationalDistr {
     }
 }
 
-use num_complex::Complex64;
 /// ComplexDistr is a distribution for generating random complex numbers
 pub struct ComplexDistr { }
 impl Distribution<Complex64> for ComplexDistr {
@@ -109,4 +112,79 @@ pub fn are_rational_slp_similar(slp1: &SLP<Rational64>, slp2: &SLP<Rational64>) 
     let input_vals = metavars.map(|m| (m.clone(), dist.sample(&mut rng) )).collect();
     let similar = are_slps_similar(&input_vals, slp1, slp2);
     (input_vals, similar)
+}
+
+type Poly<T> = BTreeMap< BTreeMap<Vec<u32>, u32>, T>;
+
+fn add_poly<T> (p1: Poly<T>, p2: &Poly<T>) -> Poly<T>
+where T: Add<Output=T> + Default + PartialEq + Clone,
+{
+    let mut res = p1.clone();
+    for term in p2 {
+        // term in both polynomials => add coefficients
+        if let Some(x) = res.get_mut(term.0) {
+            if x.clone() + term.1.clone() == T::default() {
+                res.remove(&term.0);
+            } else {
+                *x = x.clone() + term.1.clone();
+            }
+        } else { // term in second poly only => add term alongside coefficient
+            if !(term.1.clone() == T::default()) {
+                res.insert(term.0.clone(), term.1.clone());
+            }
+        }
+    }
+    res
+}
+
+fn mul_mono<T>(p1: &Poly<T>, m2: (&BTreeMap<Vec<u32>, u32>,&T)) -> Poly<T>
+where T: Mul<Output=T> + Default + PartialEq + Clone,
+{
+    if m2.0.is_empty() || m2.1 == &T::default() {
+        return BTreeMap::new();
+    }
+
+    let mut res = BTreeMap::new();
+    for term in p1 {
+        let mut res_term = term.0.clone();
+
+        for var in m2.0 {
+            if let Some(x) = res_term.get_mut(var.0) {
+                *x = *var.1;
+            } else {
+                res_term.insert(var.0.clone(), *var.1);
+            }
+        }
+        res.insert(res_term, term.1.clone() * m2.1.clone());
+    }
+
+    res
+}
+
+fn mul_poly<T>(p1: Poly<T>, p2: Poly<T>) -> Poly<T>
+where T: Add<Output=T> + Mul<Output=T> + Default + PartialEq + Clone,
+{
+    let terms: Vec<Poly<T>> = p2.iter().map(|t| mul_mono(&p1, t)).collect();
+    if terms.len() == 0 {
+        BTreeMap::new()
+    } else {
+        let first = terms[0].clone();
+        terms.iter().skip(1).fold(first, |acc, el| add_poly(acc, el))
+    }
+}
+
+fn stringify_pvar(v: &Vec<u32>) -> String {
+    "C<".to_string() + &v.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",") + ">"
+}
+fn stringify_mono(m: &BTreeMap<Vec<u32>,u32>) -> String {
+    m.iter().map(|t| stringify_pvar(t.0) + "." + &t.1.to_string()).collect::<Vec<_>>().join(".")
+}
+fn stringify_poly<T: Display>(p: &Poly<T>) -> String {
+    p.iter().map(|(m,c)| "(".to_string() + &c.to_string() + ")" + &stringify_mono(m)).collect::<Vec<_>>().join(" + ")
+}
+
+pub fn stepwise_slp_to_poly<T>(slp: &SLP<T>)
+where T: Add<Output=T> + Mul<Output=T> + Default + PartialEq + Clone + Display,
+{
+    unimplemented!()
 }
