@@ -3,7 +3,7 @@
 use std::fmt::Display;
 
 use super::straight_line_program::SLP;
-use super::straight_line_program::{add_slp, scale_slp};
+use super::straight_line_program::{add_slp, mult_slp, scale_slp};
 use super::straight_line_program::stringify_slp;
 
 /// LASum wraps a vector denoting a collection of terms to be summed together
@@ -48,17 +48,18 @@ use nalgebra::DMatrix;
 fn casimir_eigenval(casimir_num: u32, lambda: &Vec<u32>, k: usize) -> i64 {
     let a = DMatrix::<i64>::from_fn(k, k, |i, j| {
         if i==j {
-            lambda[i] as i64 + k as i64 - i as i64
+            lambda[i] as i64 + k as i64 - i as i64 - 1
         } else if i<j {
             -1
         } else {
             0
         }
     });
-    let a_pow_p = a.pow(casimir_num);
+    dbg!(&a);
+    let a_pow_p = dbg!(a.pow(casimir_num));
     let e = DMatrix::<i64>::from_element(k, k, 1);
 
-    (a_pow_p * e).trace()
+    dbg!(a_pow_p * e).trace()
 }
 
 /// find_distinguishing_casimir_index finds the index of a casimir element that has a different eigenvalue for the two partitions provided
@@ -173,9 +174,9 @@ where T: Clone + Display, F: Fn(u32) -> T,
 }
 
 use super::transformations2::*;
-use std::ops::Mul;
-use std::ops::Div;
-use std::ops::Sub;
+use std::fmt::Debug;
+use std::ops::{Add, Sub, Mul, Div};
+
 
 /// apply_candidate_partitions_to_slp applies all candidate
 /// the projection is defined as P_{\lambda} = \Pi_{\mu \in \Lambda, \mu \neq \lambda} {
@@ -193,7 +194,7 @@ use std::ops::Sub;
 /// returns a result of either the projected slp or an error message detailing the issue
 fn apply_candidate_partitions_to_slp<T,F>(slp: SLP<T>, lambda: &Vec<u32>, partitions: &Vec<(Vec<u32>, usize)>, i64_to_c: F, unit: T) -> Result<SLP<T>, String>
 where 
-    T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T>,
+    T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T> + Debug,
     F: Fn(i64) -> T,
 {
     // steps of finding the projection:
@@ -230,7 +231,7 @@ where
     
         // transform term2 by chi_{mu}
         let mut slp_chi_mu_scaled = slp.clone();
-        scale_slp(&mut slp_chi_mu_scaled, (T::default() - unit.clone()) * i64_to_c(casimir_eigenval(*el_index as u32, &mu, k)) );
+        scale_slp(&mut slp_chi_mu_scaled, (T::default() - unit.clone()) * dbg!( i64_to_c(casimir_eigenval(dbg!(*el_index as u32), dbg!(&mu), k)) ) );
 
         let mut slp_prod_term = add_slp(mu_c_applied_slp, slp_chi_mu_scaled);
         let scalar = unit.clone() / ( i64_to_c(casimir_eigenval(*el_index as u32, lambda, k)) - i64_to_c(casimir_eigenval(*el_index as u32, &mu, k)) );
@@ -243,7 +244,7 @@ where
         return Err(String::from("Every casimir failed"));
     }
     let first_el = slp_product[0].clone();
-    let slp_proj = slp_product.into_iter().skip(1).fold(first_el, |acc, slp| add_slp(acc,slp));
+    let slp_proj = slp_product.into_iter().skip(1).fold(first_el, |acc, slp| mult_slp(acc,slp));
     Ok(slp_proj)
 }
 
@@ -262,7 +263,7 @@ where
 /// returns a result of either the projected slp or an error message detailing the issue
 pub fn apply_projection_to_slp<T, F>(slp: SLP<T>, lambda: &Vec<u32>, i64_to_c: F, unit: T) -> Result<SLP<T>, String>
 where
-    T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T>,
+    T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T> + Debug,
     F: Fn(i64) -> T,
 
 {
@@ -282,14 +283,13 @@ where
     apply_candidate_partitions_to_slp(slp, lambda, &distinguishing_partitions, i64_to_c, unit)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use num_rational::Rational64;
     use std::fs::File;
     use std::io::Read;
-    use crate::evaluation::are_rational_slp_similar;
+    use crate::evaluation::{are_rational_slp_similar, stepwise_slp_to_poly};
     use crate::straight_line_program::scale_slp;
     use crate::parsing::slp_parser_rational;
 
@@ -298,6 +298,11 @@ mod tests {
         let casimir = find_casimir(2, 3);
         print!(" casimir: {casimir:?}");
         assert!(true);
+    }
+
+    #[test]
+    fn find_casimir_eigenval_3_3() {
+        assert_eq!( 48, casimir_eigenval(2, &vec![6,0,0], 3));
     }
 
     #[test]
@@ -343,6 +348,8 @@ mod tests {
         scale_slp(&mut slp_res, Rational64::from_integer(4));
         scale_slp(&mut slp_res2, Rational64::from_integer(20));
 
+        println!("{}", stepwise_slp_to_poly( &slp_proj2, Rational64::ONE ));
+
         assert!(are_rational_slp_similar(&slp_proj, &slp_res).1);
         assert!(are_rational_slp_similar(&slp_proj2, &slp_res2).1);
     }
@@ -363,11 +370,14 @@ mod tests {
         let mut res_str: String = String::new();
         File::open("example_5_4_proj.txt").unwrap().read_to_string(&mut res_str).unwrap();
         let mut res_slp = slp_parser_rational(&res_str).unwrap();
-        scale_slp(&mut res_slp, Rational64::new(1,60) );
+        // scale_slp(&mut res_slp, Rational64::new(1,60) );
 
         let i64_to_c = |i| { Rational64::new(i,1) };
         let unit = Rational64::ONE;
-        let proj_slp = apply_candidate_partitions_to_slp(slp, &lambda, &distinguishing_parts, i64_to_c, unit).unwrap();
+        let mut proj_slp = apply_candidate_partitions_to_slp(slp, &lambda, &distinguishing_parts, i64_to_c, unit).unwrap();
+        scale_slp(&mut proj_slp, Rational64::new(60,1) );
+        println!("{}", stepwise_slp_to_poly(&proj_slp, Rational64::ONE));
+        println!("{}", stepwise_slp_to_poly(&res_slp, Rational64::ONE));
         assert!(are_rational_slp_similar(&res_slp, &proj_slp).1);
     }
 }

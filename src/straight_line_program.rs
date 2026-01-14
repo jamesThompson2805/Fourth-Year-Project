@@ -37,7 +37,7 @@ fn stringify_slpvar<T:Display>(var: &SLPVar<T>) -> String {
     }
 }
 /// stringify_slpline returns a string expression of a slp line
-fn stringify_slpline<T: Display>(line: &SLPLine<T>) -> String {
+pub fn stringify_slpline<T: Display>(line: &SLPLine<T>) -> String {
     use SLPLine::*;
     match line {
         Input(m) => format!("C<{}>",m.into_iter().map(|i| i.to_string()).collect::<Vec<String>>().join(",")),
@@ -62,6 +62,13 @@ pub fn add_slp<T>(mut slp1: SLP<T>, mut slp2: SLP<T>) -> SLP<T> {
     let mut slp: Vec<SLPLine<T>> = vec![];
     slp.append(&mut slp1);
     slp.append(&mut slp2);
+    for line in slp.iter_mut().skip(len1) {
+        match line {
+            Compound(( L(n1), _, L(n2) )) => {*n1 += len1; *n2 += len1},
+            Compound(( L(n), _, _ )) | Compound(( _, _, L(n) )) => *n += len1,
+            _ => (),
+        }
+    }
     slp.push(
         Compound(( L(len1 - 1), Plus, L(len1 + len2 - 1)))
     );
@@ -78,6 +85,13 @@ pub fn mult_slp<T>(mut slp1: SLP<T>, mut slp2: SLP<T>) -> SLP<T> {
     let mut slp: Vec<SLPLine<T>> = vec![];
     slp.append(&mut slp1);
     slp.append(&mut slp2);
+    for line in slp.iter_mut().skip(len1) {
+        match line {
+            Compound(( L(n1), _, L(n2) )) => {*n1 += len1; *n2 += len1},
+            Compound(( L(n), _, _ )) | Compound(( _, _, L(n) )) => *n += len1,
+            _ => (),
+        }
+    }
     slp.push(
         Compound(( L(len1 - 1), Mult, L(len1 + len2 - 1)))
     );

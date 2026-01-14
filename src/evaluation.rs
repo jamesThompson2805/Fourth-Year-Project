@@ -150,7 +150,7 @@ where T: Mul<Output=T> + Default + PartialEq + Clone,
 
         for var in m2.0 {
             if let Some(x) = res_term.get_mut(var.0) {
-                *x = *var.1;
+                *x = x.clone() + *var.1;
             } else {
                 res_term.insert(var.0.clone(), *var.1);
             }
@@ -161,7 +161,7 @@ where T: Mul<Output=T> + Default + PartialEq + Clone,
     res
 }
 
-fn mul_poly<T>(p1: Poly<T>, p2: Poly<T>) -> Poly<T>
+fn mul_poly<T>(p1: &Poly<T>, p2: &Poly<T>) -> Poly<T>
 where T: Add<Output=T> + Mul<Output=T> + Default + PartialEq + Clone,
 {
     let terms: Vec<Poly<T>> = p2.iter().map(|t| mul_mono(&p1, t)).collect();
@@ -173,18 +173,70 @@ where T: Add<Output=T> + Mul<Output=T> + Default + PartialEq + Clone,
     }
 }
 
+fn scale_poly<T>(p1: &Poly<T>, c: T) -> Poly<T>
+where T: Mul<Output=T> + Clone + PartialEq + Default,
+{
+    if c == T::default() {
+        return BTreeMap::new();
+    }
+    p1.iter().map(|(k,v)| (k.clone(), v.clone() * c.clone() )).collect()
+}
+
 fn stringify_pvar(v: &Vec<u32>) -> String {
     "C<".to_string() + &v.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",") + ">"
 }
 fn stringify_mono(m: &BTreeMap<Vec<u32>,u32>) -> String {
-    m.iter().map(|t| stringify_pvar(t.0) + "." + &t.1.to_string()).collect::<Vec<_>>().join(".")
+    m.iter().map(|t| stringify_pvar(t.0) + "^" + &t.1.to_string()).collect::<Vec<_>>().join(".")
 }
 fn stringify_poly<T: Display>(p: &Poly<T>) -> String {
     p.iter().map(|(m,c)| "(".to_string() + &c.to_string() + ")" + &stringify_mono(m)).collect::<Vec<_>>().join(" + ")
 }
 
-pub fn stepwise_slp_to_poly<T>(slp: &SLP<T>)
+pub fn stepwise_slp_to_poly<T>(slp: &SLP<T>, unit: T) -> String
 where T: Add<Output=T> + Mul<Output=T> + Default + PartialEq + Clone + Display,
 {
-    unimplemented!()
+    use SLPLine::*;
+    use SLPVar::*;
+    use Operation::*;
+    let mut lines: Vec<Poly<T>> = Vec::new();
+    for line in slp {
+        lines.push( 
+        match line {
+            Input(m) => BTreeMap::from([(  BTreeMap::from([(m.clone(), 1)]), unit.clone()  )]),
+
+            Compound(( C(t1), Plus, C(t2) )) => {
+                if t1.clone() + t2.clone() == T::default() { // handle case of value being 0
+                    BTreeMap::new()
+                } else {
+                    BTreeMap::from([( BTreeMap::new(), t1.clone() + t2.clone() )])
+                }
+            },
+            Compound(( C(t1), Mult, C(t2) )) => {
+                if t1.clone() * t2.clone() == T::default() { // handle case of value being 0
+                    BTreeMap::new()
+                } else {
+                    BTreeMap::from([( BTreeMap::new(), t1.clone() * t2.clone() )])
+                }
+            },
+
+            Compound(( C(t), Plus, L(n) )) | Compound(( L(n), Plus, C(t) )) => {
+                let mut res = lines[*n].clone();
+                if let Some(x) = res.get_mut(&BTreeMap::new() ) {
+                    *x = x.clone() + t.clone();
+                } else {
+                    res.insert( BTreeMap::new(), t.clone() );
+                }
+                res
+            },
+            Compound(( C(t), Mult, L(n) )) | Compound(( L(n), Mult, C(t) )) => {
+                scale_poly(&lines[*n], t.clone())
+            },
+            Compound(( L(n1), Plus, L(n2) )) => add_poly( lines[*n1].clone(), &lines[*n2] ),
+            Compound(( L(n1), Mult, L(n2) )) => mul_poly( &lines[*n1],&lines[*n2] ),
+        });
+    }
+
+    (0..slp.len()).map(
+        |i| format!("L{i: <4}: {: <15} : {}", stringify_slpline(&slp[i]), stringify_poly(&lines[i]) )
+    ).collect::<Vec<_>>().join("\n")
 }
