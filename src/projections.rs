@@ -283,6 +283,37 @@ where
     apply_candidate_partitions_to_slp(slp, lambda, &distinguishing_partitions, i64_to_c, unit)
 }
 
+use std::collections::HashMap;
+/// eval_proj_pairs reduces the product of projections in eq17 to a list of projections to add together, this is necessary as we do not have distributivity
+///  and hence all need to be expanded out and computed as a sum of applications and scaling.
+/// v is a vector of pairs (usize, T) representing a term in the product of the form (C_n, \Chi_{n}(C_n)) representing (C_n - \Chi_{n}(C_n))
+/// returns the list of projections to apply and sum together
+fn eval_proj_pairs<T>(v: &[(usize, T)]) -> HashMap<Vec<usize>, T>
+where T: Mul<Output=T> + Add<Output=T> + Clone,
+{
+    if v.len() == 0 { HashMap::new() }
+    else if v.len() == 1 { HashMap::from([ (vec![v[0].0], v[0].1.clone()) ]) }
+    else {
+        let before = eval_proj_pairs(&v[1..]);
+        let mut res: HashMap<Vec<usize>, T> = HashMap::new();
+        for (vec,val) in before {
+            if let Some(coeff) = res.get_mut(&vec) {
+                *coeff = coeff.clone() + v[0].1.clone() * val.clone();
+            } else {
+                res.insert(vec.clone(), v[0].1.clone()*val.clone());
+            }
+            
+            let vec_new = [vec, vec![v[0].0]].concat();
+            if let Some(coeff) = res.get_mut(&vec_new) {
+                *coeff = coeff.clone() + v[0].1.clone() * val;
+            } else {
+                res.insert(vec_new, v[0].1.clone()*val);
+            }
+        }
+        res
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
