@@ -144,17 +144,18 @@ pub fn get_metavar_monomial_degree<T>(slp: &SLP<T>) -> Option<u32> {
     }
 }
 
-/// are_all_line_refs_valid returns boolean of whether all references to other lines in the program come before the current line
+/// are_all_line_refs_valid returns option of whether all references to other lines in the program come before the current line
+///  if there are invalid lines, the first is provided
 ///  this enforces the property that the SLP is a Directed Acyclic Graph
-pub fn are_all_line_refs_valid<T>(slp: &SLP<T>) -> bool {
+pub fn are_all_line_refs_valid<T>(slp: &SLP<T>) -> Option<usize> {
     use SLPLine::*;
     use SLPVar::*;
-    slp.iter().enumerate().all(|(i,line)| match line {
-        Compound(( L(n1), _, L(n2) )) => n1 < &i && n2 < &i,
-        Compound(( L(n), _, _ )) | Compound(( _, _, L(n) )) => n < &i,
-        Compound(_) => true,
-        Input(_) => true,
-    })
+    slp.iter().enumerate().find(|(i,line)| match line {
+        Compound(( L(n1), _, L(n2) )) => n1 >= &i || n2 >= &i,
+        Compound(( L(n), _, _ )) | Compound(( _, _, L(n) )) => n >= &i,
+        Compound(_) => false,
+        Input(_) => false,
+    }).map(|(i,_)| i)
 }
 
 

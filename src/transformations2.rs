@@ -255,9 +255,9 @@ fn include_line_from_slp<T: Clone>(line: &SLPLine<T>, lno: usize, p_slp: &mut Pa
 /// eij is the transformation
 /// u32_to_c is a function converting a u32 to the custom coefficient type T, ensure that u32_to_c(0) is sensible (ie. is 0 in your vector field)
 /// returns result of slp or error message about failure
-pub fn apply_eij_on_program<T, F>(slp: &SLP<T>, eij: (usize, usize), u32_to_c: F) -> Result<SLP<T>,&'static str>
+pub fn apply_eij_on_program<T, F>(slp: &SLP<T>, eij: (usize, usize), u32_to_c: F) -> Result<SLP<T>,String>
 where
-    T: Clone,
+    T: Clone + Display,
     F: Fn(u32)->T + Copy,
 {
     use PartialSLPLine::*;
@@ -270,10 +270,12 @@ where
     //  3. Invert PartialSLP, LTT -> LIP,  correction of indices, conversion to SLP 
 
     // 0. Validity of inputs
-    if !are_all_line_refs_valid(slp) { return Err("SLP contains a line reference to a line not strictly before itself"); }
-    if !are_metavars_all_same_len(slp) { return Err("SLP contains metavariables of different lengths"); }
-    if !do_metavars_refer_to_homogeneous_poly(slp) { return Err("SLP has metavariables referring to non-homogeneous polynomial"); }
-    if eij.0 >= get_metavar_len(slp).unwrap() || eij.1 >= get_metavar_len(slp).unwrap() { return Err("Eij refers to a matrix larger than the size of the metavariables"); }
+    if let Some(i) = are_all_line_refs_valid(slp) {
+        return Err(format!("SLP contains line reference to a line not strictly before itself on line {i}:{}", stringify_slpline(&slp[i])));
+    }
+    if !are_metavars_all_same_len(slp) { return Err("SLP contains metavariables of different lengths".into()); }
+    if !do_metavars_refer_to_homogeneous_poly(slp) { return Err("SLP has metavariables referring to non-homogeneous polynomial".into()); }
+    if eij.0 >= get_metavar_len(slp).unwrap() || eij.1 >= get_metavar_len(slp).unwrap() { return Err("Eij refers to a matrix larger than the size of the metavariables".into()); }
     
     // 1. Initialisation
     let mut p_slp: PartialSLP<T> = vec![];
@@ -282,7 +284,7 @@ where
 
     // include the final line as the first line to transform, to propagate backwards through the slp
     lines_to_trans.insert( slp.len()-1, Transforms::Transformed );
-    
+
     // 2. Calculation of each line
     for (lno, line) in slp.iter().enumerate().rev() {
         if let Some(&t) = lines_to_trans.get(&lno) {
@@ -325,6 +327,7 @@ where
         match line {
             Compound(( LIP(0), _, LIP(0) )) => (), // handle cases where we don't want to map 0 first
             Compound(( LIP(0), _, LIP(n) )) | Compound(( LIP(n), _, LIP(0) )) => *n = p_len-*n-1,
+            Compound(( LIP(0), _, _)) | Compound(( _, _, LIP(0) )) => (),
             Compound(( LIP(n1), _, LIP(n2) )) => { *n1 = p_len-*n1-1; *n2 = p_len-*n2-1;}
             Compound(( LIP(n), _, _ )) | Compound(( _, _, LIP(n) )) => *n = p_len-*n-1,
             _ => (),
@@ -361,11 +364,11 @@ where
 /// returns result of slp or error message about first failure
 pub fn apply_eijs_on_program<T, F>(slp: &SLP<T>, eijs: &Vec<(usize, usize)>, u32_to_c: F) -> Result<SLP<T>,String>
 where
-    T: Clone,
+    T: Clone + Display,
     F: Fn(u32) -> T + Copy,
 {
     eijs.iter().enumerate().rev().try_fold(slp.clone()
-    , |s, (i, &eij)| apply_eij_on_program(&s, eij, u32_to_c).map_err(|s| format!("Failure index {i}, Error: {s}"))
+    , |s, (i, &eij)| apply_eij_on_program(&s, eij, u32_to_c).map_err(|err| format!("Failure index {i}, Error: {err}, SLP: {}", stringify_slp(&s)))
     )
 }
 

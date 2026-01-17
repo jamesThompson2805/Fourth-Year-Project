@@ -2,6 +2,8 @@
 #![allow(dead_code)]
 use std::fmt::Display;
 
+use crate::evaluation::stepwise_slp_to_poly;
+
 use super::straight_line_program::SLP;
 use super::straight_line_program::{add_slp, mult_slp, scale_slp};
 use super::straight_line_program::stringify_slp;
@@ -315,7 +317,7 @@ where T: Mul<Output=T> + Add<Output=T> + Clone + Debug,
     }
 }
 
-/// apply_candidate_partitions_to_slp applies2 all candidate
+/// apply_candidate_partitions_to_slp2 applies all candidate
 /// the projection is defined as P_{\lambda} = \Pi_{\mu \in \Lambda, \mu \neq \lambda} {
 ///     \frac{ U_{\mu} - \Chi_{\mu}(U_{\mu}) }{ \Chi_{\lambda}(U_{\mu}) - \Chi_{\mu}(U_{\mu}) }
 /// }
@@ -331,7 +333,7 @@ where T: Mul<Output=T> + Add<Output=T> + Clone + Debug,
 /// returns a result of either the projected slp or an error message detailing the issue
 fn apply_candidate_partitions_to_slp2<T,F>(slp: SLP<T>, lambda: &Vec<u32>, partitions: &Vec<(Vec<u32>, usize)>, i64_to_c: F, unit: T) -> Result<SLP<T>, String>
 where 
-    T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T> + Add<Output=T> + Debug,
+    T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T> + Add<Output=T> + Debug + PartialEq,
     F: Fn(i64) -> T,
 {
     // steps of finding the projection:
@@ -343,12 +345,13 @@ where
     let k = dbg!(lambda.len());
     if partitions.iter().any(|(v,_)| v.len() != k) { return Err(String::from("Partitions not all same length")); }
 
-    let terms: Vec<(usize, T)> = partitions.iter().map(|(v,i)| ( *i, i64_to_c(casimir_eigenval((*i) as u32, v, k)) )).collect();
+    let terms: Vec<(usize, T)> = partitions.iter().map(|(v,i)| ( *i, (T::default() - unit.clone()) * i64_to_c(casimir_eigenval((*i) as u32, v, k)) )).collect();
     let expanded = eval_proj_pairs(&terms.as_slice(), unit.clone());
     let _ = dbg!(&expanded);
 
     let mut summands = Vec::new();
     for (proj_s, c) in expanded {
+        println!("Proj: {proj_s:?}");
         let mut slp_term = proj_s.into_iter().try_fold(slp.clone(),
          |acc, proj| apply_casimir_to_slp(&acc, proj, k, |x| i64_to_c(x as i64))
         )?;
@@ -461,8 +464,9 @@ mod tests {
         let unit = Rational64::ONE;
         let mut proj_slp = apply_candidate_partitions_to_slp2(slp, &lambda, &distinguishing_parts, i64_to_c, unit).unwrap();
         scale_slp(&mut proj_slp, Rational64::new(60,1) );
-        println!("{}", stepwise_slp_to_poly(&proj_slp, Rational64::ONE));
+        // println!("{}", stepwise_slp_to_poly(&proj_slp, Rational64::ONE));
         println!("{}", stepwise_slp_to_poly(&res_slp, Rational64::ONE));
+        println!("{:?}", stepwise_slp_to_poly(&proj_slp, Rational64::ONE).split("\n").last());
         assert!(are_rational_slp_similar(&res_slp, &proj_slp).1);
     }
 }
