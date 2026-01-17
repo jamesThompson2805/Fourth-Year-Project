@@ -174,7 +174,7 @@ where T: Clone + Display, F: Fn(u32) -> T,
     )
 }
 
-use super::transformations2::*;
+use super::transformations::*;
 use std::fmt::Debug;
 use std::ops::{Add, Sub, Mul, Div};
 

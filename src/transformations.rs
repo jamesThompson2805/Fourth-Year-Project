@@ -1,421 +1,415 @@
-use crate::straight_line_program::MetaVar;
-use crate::straight_line_program::LineVar;
-use crate::straight_line_program::Operation;
-use crate::straight_line_program::SLPLine;
-use crate::straight_line_program::SLPVar;
-use crate::straight_line_program::SLP;
+//! transformations provides the operations to apply the actions to a metapolynomial
+//! Currently this only includes action by Eij, a kxk matrix where E(k,l) <- Indicator(k=i and l=j)
+//! This element has a simpler action on a SLP and is all that is initially needed to program projections
+//! If a constructive method to define a projection by a single element of GL_{k} is found, then the more general action may be implemented
+#![allow(dead_code)]
 
-use num_complex::Complex64;
+use crate::straight_line_program::*;
+
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
-type TMatrix = Vec<u32>;
-type LineMapper = HashMap<LineVar, HashMap<TMatrix, LineVar>>;
-type LinesToParse = HashMap<usize, HashSet<TMatrix>>;
-type MetaVarSet = HashSet<MetaVar>;
-type MetaVarLineMap = HashMap<MetaVar,usize>;
+/*
+    To apply Eij action onto an SLP, the method works recursively backwards through the SLP
+    Eij . m = m' ( or 0 ) will characterise 0 as the default value of C
+    Eij . (A+B) = (Eij . A) + (Eij . B)
+    Eij . (A*B) = (Eij . A)*B + A*(Eij . B)
+
+    Hence we construct the new SLP backwards and allow for references to operations not yet applied, like (Eij . L3)
+    Going backwards through the SLP, a line may need to be included as is, or included transformed by Eij so store a dictionary <usize, <AsIs | Transformed | Both>>
+     to see what needs to occur for each line
+    Upon transforming a line, the result is stored in a PartialSLP, a structure designed to accomodate references to transformations not yet applied
+     and the index of the transformed line is stored in another dictionary structure <(usize,bool), usize> where bool is whether this was the Transformed line or kept as it was
+     to allow the later step to replace a transformation to be done with a line number reference to that new line.
+    As the partial slp is built backwards and includes indices to itself, we choose to index as if it is the right way around and flip all LIP (Line references Inside Partial)
+     at the end, as the final size won't be determined until the end
+     
+     Choices:
+      - Are duplicates of metavars optimised away (before and/or after)
+      - Are duplicates of lines optimised away (before and/or after)
+
+*/
+
+#[derive(Debug,PartialEq,Copy,Clone)]
+enum Transforms { AsIs, Transformed, Both }
 
 
-#[derive(Debug)]
-enum PartialSLPVar {
-    LineToTranslate( (TMatrix, LineVar) ),
-    MetaVarRef( MetaVar ),
-    Coeff( Complex64 ),
-    LineInProgram( LineVar ), // for the multiplication case
-}
-#[derive(Debug)]
-enum PartialSLPLine {
+/// LinesToTransform holds dict of lines in original SLP and whether they are needed in transformed SLP, with or without transformation
+type LinesToTransform = HashMap<usize, Transforms>;
+/// LineMap holds dict of lines and transformation applied from original SLP and location in new transformed partial SLP
+type LineMap = HashMap<(usize, bool), usize>;
+
+/// PartialSLPVar is a structure mimicking SLPVar but in an unfinished format allowing it to be converted to a valid SLPVar later
+enum PartialSLPVar<T> {
+    LIP(usize), // LineInPartial is index of an earlier line in the transformed partial slp
+    LTT( (usize, bool) ), // LineToTranslate, bool represents whether it should be transformed by eij or not
+    C(T),
     Zero,
-    Input(MetaVar),
-    Compound((PartialSLPVar, Operation, PartialSLPVar)),
-    Jump( PartialSLPVar ),
 }
-type PartialSLP = Vec<PartialSLPLine>;
+/// PartialSLPLine is a structure mimicking SLPLine but in an unfinished format allowing it to be converted to it later
+enum PartialSLPLine<T> {
+    Input(MetaVar),
+    Compound((PartialSLPVar<T>, Operation, PartialSLPVar<T>)),
+}
+/// PartialSLPis a structure mimicking SLPbut in an unfinished format allowing it to be converted to it later
+type PartialSLP<T> = Vec<PartialSLPLine<T>>;
 
-fn stringify_partialslpvar(var: &PartialSLPVar) -> String {
+use std::fmt::Display;
+/// stringify_partialslpvar returns string presentation of partialslpvar for debugging
+fn stringify_partialslpvar<T: Display>(var: &PartialSLPVar<T>) -> String {
     use PartialSLPVar::*;
     match var {
-        LineToTranslate((tm,lno)) => format!("{tm:?}.L{lno}"),
-        MetaVarRef(m) => format!("CR<{}>", m.into_iter().map(|i| i.to_string()).collect::<Vec<String>>().join(",")),
-        Coeff(c) => c.to_string(),
-        LineInProgram(lno) => format!("PL{lno}"),
+        LTT((lno,transforming)) => format!("LTT({lno},T?{transforming})"),
+        C(c) => c.to_string(),
+        LIP(lno) => format!("LIP{lno}"),
+        Zero => format!("0"),
     }
 }
-fn stringify_partialslpline(line: &PartialSLPLine) -> String {
+/// stringify_partialslpline returns string presentation of partialslpline for debugging
+fn stringify_partialslpline<T: Display>(line: &PartialSLPLine<T>) -> String {
     use PartialSLPLine::*;
     match line {
-        Zero => "0".to_string(),
         Input(m) => format!("C<{}>",m.into_iter().map(|i| i.to_string()).collect::<Vec<String>>().join(",")),
         Compound((s1,Operation::Plus, s2)) => format!("{} + {}", stringify_partialslpvar(s1), stringify_partialslpvar(s2)),
         Compound((s1,Operation::Mult, s2)) => format!("{} * {}", stringify_partialslpvar(s1), stringify_partialslpvar(s2)),
-        Jump(s) => format!("{}",stringify_partialslpvar(s)),
     }
 }
-fn stringify_partialslp(p_slp: &PartialSLP) -> String {
+/// stringify_partialslp returns string presentation of partialslp for debugging
+fn stringify_partialslp<T: Display>(p_slp: &PartialSLP<T>) -> String {
     p_slp.iter().enumerate().map(|(i,l)| "L".to_string() + i.to_string().as_str() + ": " + stringify_partialslpline(l).as_str() )
         .collect::<Vec<String>>().join("\n")
 }
 
-
-// WE APPLY CONVENTION OF INDEX 0 HERE
-pub fn apply_e_ij(m: &MetaVar, i: usize, j: usize) -> Option<(MetaVar, Complex64)> {
-    if i >= m.len() || j >= m.len() { return None; }
-    
-    if m[j] == 0 { return None; }
-    let mut m_copy = m.clone();
-    let coeff = Complex64::new( m[i].into(),0.);
-    if i == j { return Some((m_copy, coeff)); }
-
-    m_copy[j] -= 1;
-    m_copy[i] += 1;
-    Some((m_copy, coeff+1.0))
-}
-
-fn apply_x_i_input(m: &MetaVar, vi: &TMatrix, metavar_refs: &mut MetaVarSet) -> Option<(MetaVar, Complex64)> {
-    // apply each of the bases for R^(k*k) one after another a number of times according to vi (ie. vis should have size k^2)
-    // the bases need to be applied in lexigraphical ordering, an ordering not mentioned in the paper!
-    // ORDERING ASSUMPTION: 
-    //  will enumerate E_ij by i THEN j ie (0,0), (0,1), .., (0.k), (1,0), (1,1), ...
-    // MULTIPLICATION ASSUMPTION:
-    //  operation acts like differentiation by x_j multiplied by x_i => previous coefficients just combine:
-    //  E_01 . 4*c<0,1,1> = 4 * E_01 . c<0,1,1> = 4 * c<1,0,1>
-
-    let mut coeff = Complex64::ONE;
-    let mut meta = m.clone();
-    for i in 0..m.len() {
-        for j in 0..m.len() {
-            for _ in 0..vi[i*m.len() + j] {
-                let (m,c) = apply_e_ij(&meta, i, j)?;
-                meta = m;
-                coeff *= c;
-            }
-        }
-    }
-    if coeff == Complex64::ZERO { return None;}
-    metavar_refs.insert(meta.clone());
-    Some((meta, coeff))
-}
-
-fn transform_x_i_input(m: &MetaVar, vi: &TMatrix, metavar_refs: &mut MetaVarSet, partial_program: &mut PartialSLP) {
-    use PartialSLPLine::{Compound, Zero};
-    use PartialSLPVar::{Coeff, MetaVarRef};
-    use Operation::Mult;
-    if let Some((meta, coeff)) = apply_x_i_input(m, vi, metavar_refs) {
-        partial_program.push( Compound(( Coeff(coeff), Mult, MetaVarRef(meta) )) );
+/// apply_eij_on_metavar applies the group action of Eij onto a metavariable, as defined by Claim 4.2 of Algebraic metacomplexity and representation theory
+fn apply_eij_on_metavar(m: &MetaVar, eij: (usize, usize)) -> Option<(u32,MetaVar)> {
+    let (i,j) = eij;
+    if i >= m.len() || j >= m.len() { // out of bounds for the metavariable => this is undefined behaviour / will result in 0
+        None
+    } else if m[j] == 0 { // always results in 0
+        None
+    } else if i != j {
+        let mut m_new = m.clone();
+        m_new[i] += 1; m_new[j] -= 1;
+        Some((m[i]+1, m_new))
     } else {
-        partial_program.push( Zero );
+        Some((m[i], m.clone()))
     }
 }
 
-fn add_matrix_to_lines_to_parse(line: LineVar, vi: TMatrix, lines_to_parse: &mut LinesToParse) {
-    if let Some(hs) = lines_to_parse.get_mut(&line) {
-        hs.insert( vi );
-    } else {
-        lines_to_parse.insert(line, HashSet::from([vi]) );
-    }
-}
-
-fn transform_x_i_plus(s1: &SLPVar, s2: &SLPVar, vi: &TMatrix, partial_program: &mut PartialSLP, lines_to_parse: &mut LinesToParse ) {
-    use PartialSLPLine::{Compound, Zero, Jump};
-    use PartialSLPVar::{LineToTranslate, Coeff};
-    use Operation::Plus;
-    // We transform X^i . (a + b) = 0
-    //              X^i . (Ln + b) = X^i . Ln
-    //              X^i . (a + Ln) = X^i . Ln
-    //              X^i . (Ln + Lm) = X^i . Ln + X^i . Lm
-
-    let vi_is_zero =  vi.iter().all(|&n| n==0);
-
-    if let SLPVar::F(c1) = *s1 && let SLPVar::F(c2) = *s2 {
-        if vi_is_zero {
-            partial_program.push( Compound(( Coeff(c1), Plus, Coeff(c2) )) );
-        } else {
-            partial_program.push( Zero );
-        }
-    }
-    // TODO : if time allows, optimise this cloning of vectors away, could be very costly
-    if let SLPVar::L(n) = *s1 && let SLPVar::F(c2) = *s2 {
-        if vi_is_zero {
-            partial_program.push( Compound(( Coeff(c2), Plus, LineToTranslate((vi.clone(), n)) )) );
-        } else {
-            partial_program.push( Jump( LineToTranslate((vi.clone(), n)) ) ); 
-        }
-        add_matrix_to_lines_to_parse(n, vi.clone(), lines_to_parse);
-    }
-    if let SLPVar::L(n) = *s2 && let SLPVar::F(c2) = *s1 {
-        if vi_is_zero {
-            partial_program.push( Compound(( Coeff(c2), Plus, LineToTranslate((vi.clone(), n)) )) );
-        } else {
-            partial_program.push( Jump( LineToTranslate((vi.clone(), n)) ) ); 
-        }
-        add_matrix_to_lines_to_parse(n, vi.clone(), lines_to_parse);
-    }
-    if let SLPVar::L(n1) = *s1 && let SLPVar::L(n2) = *s2 {
-        partial_program.push( Compound(( LineToTranslate((vi.clone(), n1)), Plus, LineToTranslate((vi.clone(), n2)) )) );
-        add_matrix_to_lines_to_parse(n1, vi.clone(), lines_to_parse);
-        add_matrix_to_lines_to_parse(n2, vi.clone(), lines_to_parse);
-    } 
-}
-
-use std::cmp::min;
-use std::iter::zip;
-
-fn get_all_subvecs_i(v: &[u32], i: u32) -> Vec<TMatrix> {
-    if i == 0 { return vec![Vec::from(v)]; }
-    if i == v.iter().sum() { return vec![vec![0; v.len()]]; }
-    if i > v.iter().sum() { return vec![]; }
-    if v.len() == 0 { return vec![]; }
-    if v.len() == 1 { return vec![vec![v[0]-i]]; }
-
-    let mut subvecs_i = Vec::new();
-    for j in 0..=min(i,v[0]) {
-        let subvecs_i_j = get_all_subvecs_i(&v[1..], i-j);
-        let mut subvecs_i_j: Vec<Vec<u32>> = subvecs_i_j.into_iter().map( |sv| [vec![v[0]-j], sv].concat() ).collect();
-        subvecs_i.append(&mut subvecs_i_j);
-
-    }
-    subvecs_i
-}
-fn get_all_subvecs(v: &TMatrix) -> Vec<TMatrix> {
-    (0..=v.iter().sum()).map(|i| get_all_subvecs_i(&v[..], i)).collect::<Vec<_>>().concat()
-}
-
-fn transform_x_i_mult(s1: &SLPVar, s2: &SLPVar, vi: &TMatrix, partial_program: &mut PartialSLP, lines_to_parse: &mut LinesToParse, lines_to_flip: &mut HashSet<usize> ) {
-    use SLPVar::*;
+/// apply_eij_on_input_line computes the transformation of an input line (=C<1,2,3>) under eij
+/// This involves updating the partial structures used to build the final slp: p_slp and line_map
+/// m is the metavariable in the Input line, as a reference
+/// lno is the line number of this Input line in the original SLP, needed to give the key for line_map 
+/// eij is the transformation being applied to the slp
+/// p_slp is the partial slp structure being built to be converted into a slp, it is being built backwards
+/// line_map is a dictionary mapping original line numbers and to their current index in the partial slp structure
+/// u32_to_c is a conversion function to allow the coefficients from the metavar to be included in the program, a sensible definition should have u32_to_c(0) == T::default()
+fn apply_eij_on_input_line<T,F: Fn(u32)->T>(m: &MetaVar, lno: usize, eij:(usize, usize), p_slp: &mut PartialSLP<T>, line_map: &mut LineMap, u32_to_c: F) {
     use PartialSLPVar::*;
-    // Multiplication has complications:
-    //  If both variables are coefficients then only result is Zero
-    //  If one variable is a coefficient ( = Ln * c ) then return vi . Ln
-    //  If both variables then nasty
-    match (s1,s2) {
-        (&F(_),&F(_)) => partial_program.push( PartialSLPLine::Zero ),
-        (&F(_),&L(n)) => {
-            partial_program.push( PartialSLPLine::Jump( LineToTranslate((vi.clone(), n)) ) ); 
-            add_matrix_to_lines_to_parse(n, vi.clone(), lines_to_parse);
-        },
-        (&L(n),&F(_)) => {
-            partial_program.push( PartialSLPLine::Jump( LineToTranslate((vi.clone(), n)) ) ); 
-            add_matrix_to_lines_to_parse(n, vi.clone(), lines_to_parse);
-        },
-        (&L(n1),&L(n2)) => {
-            // let subvecs = get_all_subvecs(vi);
-            // println!("subvecs: {subvecs:?}");
-            for (i,v_small) in get_all_subvecs(vi).into_iter().enumerate().rev() {
-
-                let v_small_minus:TMatrix = zip(vi,&v_small).map(|(i,j)| i-j).collect();
-                add_matrix_to_lines_to_parse(n1, v_small.clone(), lines_to_parse);
-                add_matrix_to_lines_to_parse(n2, v_small_minus.clone(), lines_to_parse);
-                if i != 0 {
-                    partial_program.push( PartialSLPLine::Compound(( LineInProgram( partial_program.len()+1 ), Operation::Plus, LineInProgram( partial_program.len()+2 ))) );
-                    lines_to_flip.insert(partial_program.len()-1);
-                }
-                partial_program.push( PartialSLPLine::Compound(( LineToTranslate((v_small,n1)), Operation::Mult, LineToTranslate((v_small_minus,n2)) )));
-            }
-        }
-
-    }
-}
-
-fn insert_into_line_ref(line_ref: &mut LineMapper, lno: usize, tm: TMatrix, val: usize) {
-    if let Some(tm_map) = line_ref.get_mut(&lno) {
-        tm_map.insert( tm, val);    
+    use PartialSLPLine::*;
+    use Operation::*;
+    if let Some((coeff,m_new)) = apply_eij_on_metavar(m, eij) {
+        // result is of form coeff * m_new, expressing in SLP is =m_new \n =Coeff*L(before)
+        // partial_slp is constructed backwards meaning we add as follows: =Coeff*L(current slp len+1), =m_new
+        //  the +1 is necessary as upon pushing, current slp len refers to index of line to be added, we want to refer to the line afterwards
+        let p_slp_len = p_slp.len();
+        p_slp.push( Compound(( C(u32_to_c(coeff)), Mult, LIP(p_slp_len+1)  ))  );
+        p_slp.push(Input(m_new));
+        // add reference to the new entry point for Eij . m into the line mapper
+        line_map.insert( (lno, true), p_slp_len);
     } else {
-        let tm_map: HashMap<TMatrix, usize> = HashMap::from([(tm,val)]);
-        line_ref.insert(lno, tm_map);
+        // result is 0
+        // know that by rules of SLP, a line cannot refer to itself => in p_slp will never have variable of LIP(0) hence this is reserved for 0
+        line_map.insert( (lno, true), 0);
     }
 }
+/// add_to_line_to_trans adds a line to be computed later by the transformation of the slp
+///  as it can be either included as is or transformed or both, these cases need to be addressed when changing the structure
+///  this function modifies lines_to_trans to update the hashmap with the correct transformations needed for lno
+/// lno is the line to be included (transformed or not)
+/// transform is the current transformation of lno desired
+/// lines_to_transform is the hashmap of the lines and their transformations needed
+fn add_to_line_to_trans(lno: usize, transform: Transforms, lines_to_trans: &mut LinesToTransform) {
+    if let Some(t) = lines_to_trans.get(&lno) {
+        if t != &transform {
+            lines_to_trans.insert(lno, Transforms::Both);
+        } else {
+            lines_to_trans.insert(lno, transform);
+        }
+    } else {
+        lines_to_trans.insert(lno, transform);
+    }
+}
+/// apply_eij_on_addition computes the transformation of an addition line (=L2+0.5) under eij
+/// This involves updating the partial structures used to build the final slp: p_slp and line_map
+/// v1 the the first term in the line
+/// v2 the the second term in the line
+/// lno is the line number of this Input line in the original SLP, needed to give the key for line_map 
+/// p_slp is the partial slp structure being built to be converted into a slp, it is being built backwards
+/// lines_to_trans is a dictionary of other lines that also need to be included into the partial slp
+/// line_map is a dictionary mapping original line numbers and to their current index in the partial slp structure
+fn apply_eij_on_addition<T>(v1: &SLPVar<T>, v2: &SLPVar<T>, lno: usize, p_slp: &mut PartialSLP<T>, lines_to_trans: &mut LinesToTransform, line_map: &mut LineMap) {
+    use SLPVar::*;
+    use PartialSLPLine::*;
+    use PartialSLPVar::{LTT,Zero};
+    use Operation::*;
+    match (v1,v2) {
+        (L(n1), L(n2)) => {
+            add_to_line_to_trans(*n1, Transforms::Transformed, lines_to_trans);
+            add_to_line_to_trans(*n2, Transforms::Transformed, lines_to_trans);
+            p_slp.push( Compound(( LTT((*n1,true)), Plus, LTT((*n2,true)) )) );
+        },
+        (L(n), C(_)) | (C(_), L(n)) => {
+            add_to_line_to_trans(*n, Transforms::Transformed, lines_to_trans);
+            p_slp.push( Compound(( LTT((*n,true)), Plus, Zero )))
+        },
+        (C(_),C(_)) =>  p_slp.push( Compound(( Zero, Plus, Zero ))),
+    }
+    line_map.insert((lno, true),  p_slp.len()-1);
+}
+/// apply_eij_on_product computes the transformation of a product line (=L2*0.5) under eij
+/// This involves updating the partial structures used to build the final slp: p_slp and line_map
+/// v1 the the first term in the line
+/// v2 the the second term in the line
+/// lno is the line number of this Input line in the original SLP, needed to give the key for line_map 
+/// p_slp is the partial slp structure being built to be converted into a slp, it is being built backwards
+/// lines_to_trans is a dictionary of other lines that also need to be included into the partial slp
+/// line_map is a dictionary mapping original line numbers and to their current index in the partial slp structure
+fn apply_eij_on_product<T: Clone>(v1: &SLPVar<T>, v2: &SLPVar<T>, lno: usize, p_slp: &mut PartialSLP<T>, lines_to_trans: &mut LinesToTransform, line_map: &mut LineMap) {
+    use SLPVar::*;
+    use PartialSLPLine::*;
+    use PartialSLPVar::{LTT,Zero,LIP};
+    use PartialSLPVar::C as PC;
+    use Operation::*;
+    let p_len = p_slp.len();
+    match (v1, v2) {
+        (L(n1), L(n2)) => {
+            add_to_line_to_trans(*n1, Transforms::Both, lines_to_trans);
+            add_to_line_to_trans(*n2, Transforms::Both, lines_to_trans);
+            p_slp.push( Compound(( LIP(p_len+1),     Plus, LIP(p_len+2) )));
+            p_slp.push( Compound(( LTT((*n1,true)),  Mult, LTT((*n2,false)) )));
+            p_slp.push( Compound(( LTT((*n1,false)), Mult, LTT((*n2,true)) )));
+        },
+        (L(n), C(c)) | (C(c), L(n)) => {
+            add_to_line_to_trans(*n, Transforms::Transformed, lines_to_trans);
+            p_slp.push( Compound(( PC(c.clone()), Mult, LTT((*n,true)) )) );
+        },
+        (C(_),C(_)) => p_slp.push( Compound(( Zero, Plus, Zero ))),
+    }
+    line_map.insert((lno, true), p_len);
+}
+/// apply_eij_on_line computes the transformation of a slp line
+/// This involves matching the line to the correct form to invoke the correct transformation function
+/// line the the line being computed
+/// lno is the line number of this Input line in the original SLP, needed to give the key for line_map 
+/// p_slp is the partial slp structure being built to be converted into a slp, it is being built backwards
+/// lines_to_trans is a dictionary of other lines that also need to be included into the partial slp
+/// line_map is a dictionary mapping original line numbers and to their current index in the partial slp structure
+fn apply_eij_to_line<T, F>(line: &SLPLine<T>, lno: usize, eij: (usize,usize), p_slp: &mut PartialSLP<T>, lines_to_trans: &mut LinesToTransform, line_map: &mut LineMap, u32_to_c: F)
+where
+    T: Clone,
+    F: Fn(u32) -> T,
+{
+    use SLPLine::*;
+    use Operation::*;
+    match line {
+        Input(m) => apply_eij_on_input_line(m, lno, eij, p_slp, line_map, u32_to_c),
+        Compound((v1, Plus, v2)) => apply_eij_on_addition(v1, v2, lno, p_slp, lines_to_trans, line_map),
+        Compound((v1, Mult, v2)) => apply_eij_on_product(v1, v2, lno, p_slp, lines_to_trans, line_map),
+    }
+}
+/// include_line_from_slp includes a line from the SLP as is into the partial slp
+/// This means copying the line across and ensuring other lines referenced will be copied across also
+/// line the the line being computed
+/// lno is the line number of this Input line in the original SLP, needed to give the key for line_map 
+/// p_slp is the partial slp structure being built to be converted into a slp, it is being built backwards
+/// lines_to_trans is a dictionary of other lines that also need to be included into the partial slp
+/// line_map is a dictionary mapping original line numbers and to their current index in the partial slp structure
+fn include_line_from_slp<T: Clone>(line: &SLPLine<T>, lno: usize, p_slp: &mut PartialSLP<T>, lines_to_trans: &mut LinesToTransform, line_map: &mut LineMap) {
+    use SLPLine::*;
+    use SLPVar::*;
+    use PartialSLPLine::Compound as PCompound;
+    use PartialSLPLine::Input as PInput;
+    use PartialSLPVar::LTT;
+    use PartialSLPVar::C as PC;
+    let p_len = p_slp.len();
+    match line {
+        Compound(( L(n1), op, L(n2) )) => {
+            add_to_line_to_trans(*n1, Transforms::AsIs, lines_to_trans);
+            add_to_line_to_trans(*n2, Transforms::AsIs, lines_to_trans);
+            p_slp.push( PCompound(( LTT((*n1,false)), *op, LTT((*n2,false)) )) );
+        },
+        Compound(( L(n), op, C(c) )) | Compound(( C(c), op, L(n) )) => {
+            add_to_line_to_trans(*n, Transforms::AsIs, lines_to_trans);
+            p_slp.push( PCompound(( PC(c.clone()), *op, LTT((*n, false)) )));
+        },
+        Compound(( C(c1), op, C(c2) )) => p_slp.push( PCompound(( PC(c1.clone()), *op, PC(c2.clone()) )) ),
+        Input(m) => p_slp.push( PInput(m.clone()) ),
+    }
+    line_map.insert((lno, false), p_len);
 
-// Result will fail if we still have variables that are LineToTranslate or MetavarRef
-// in the partial slp
-fn translate_partial_to_slp_cheat(program: PartialSLP) -> Option<SLP> {
+}
+
+/// apply_eij_on_program computes the transformation applied to the program
+/// slp is the straight line program
+/// eij is the transformation
+/// u32_to_c is a function converting a u32 to the custom coefficient type T, ensure that u32_to_c(0) is sensible (ie. is 0 in your vector field)
+/// returns result of slp or error message about failure
+pub fn apply_eij_on_program<T, F>(slp: &SLP<T>, eij: (usize, usize), u32_to_c: F) -> Result<SLP<T>,String>
+where
+    T: Clone + Display,
+    F: Fn(u32)->T + Copy,
+{
     use PartialSLPLine::*;
     use PartialSLPVar::*;
-
-    use SLPLine as SL;
-    use SLPVar as SV;
-
     use Operation::*;
+    // Steps to convert SLP:
+    //  0. Validity of inputs
+    //  1. Initialisation of structures
+    //  2. Calculation of each line
+    //  3. Invert PartialSLP, LTT -> LIP,  correction of indices, conversion to SLP 
+
+    // 0. Validity of inputs
+    if let Some(i) = are_all_line_refs_valid(slp) {
+        return Err(format!("SLP contains line reference to a line not strictly before itself on line {i}:{}", stringify_slpline(&slp[i])));
+    }
+    if !are_metavars_all_same_len(slp) { return Err("SLP contains metavariables of different lengths".into()); }
+    if !do_metavars_refer_to_homogeneous_poly(slp) { return Err("SLP has metavariables referring to non-homogeneous polynomial".into()); }
+    if eij.0 >= get_metavar_len(slp).unwrap() || eij.1 >= get_metavar_len(slp).unwrap() { return Err("Eij refers to a matrix larger than the size of the metavariables".into()); }
     
-    let mut slp: SLP = Vec::new();
-    for line in program {
+    // 1. Initialisation
+    let mut p_slp: PartialSLP<T> = vec![];
+    let mut lines_to_trans: LinesToTransform = HashMap::new();
+    let mut line_map: LineMap = HashMap::new();
+
+    // include the final line as the first line to transform, to propagate backwards through the slp
+    lines_to_trans.insert( slp.len()-1, Transforms::Transformed );
+
+    // 2. Calculation of each line
+    for (lno, line) in slp.iter().enumerate().rev() {
+        if let Some(&t) = lines_to_trans.get(&lno) {
+            if t == Transforms::AsIs || t == Transforms::Both { include_line_from_slp(line, lno, &mut p_slp, &mut lines_to_trans, &mut line_map); } 
+            if t == Transforms::Transformed || t == Transforms::Both { apply_eij_to_line(line, lno, eij, &mut p_slp, &mut lines_to_trans, &mut line_map, u32_to_c); }
+        }
+    }
+
+
+    // 3. Inversion and conversion
+    p_slp.push( Compound(( C(u32_to_c(0)), Plus, C(u32_to_c(0)) )) ); // add zero to the beginning (once reversed)
+    p_slp.reverse();
+
+    // convert all LTT to LIP as at this point every line should have a transformation in the p_slp
+    for line in p_slp.iter_mut() {
         match line {
-            Zero => slp.push(SL::Compound( (SV::F(Complex64::ZERO), Plus, SV::F(Complex64::ZERO)) )),
-            Input(m) => slp.push( SL::Input(m)),
-            Compound((s1, op, s2)) => {
-                let v1;
-                let v2;
-                if let LineInProgram(n1)=s1 && let LineInProgram(n2)=s2 {
-                    v1 = SV::L(n1); v2 = SV::L(n2);
-                } else if let LineInProgram(n1)=s1 && let Coeff(c)=s2 {
-                    v1 = SV::L(n1); v2 = SV::F(c);
-                } else if let Coeff(c)=s1 && let LineInProgram(n2)=s2 {
-                    v1 = SV::F(c); v2 = SV::L(n2);
-                } else if let Coeff(c1)=s1 && let Coeff(c2)=s2 {
-                    v1 = SV::F(c1); v2 = SV::F(c2);
-                } else { println!("returning None"); return None;}
-                slp.push(SL::Compound((v1, op, v2)));
+            Compound(( v1, _, v2)) => {
+                if let LTT(p1) = v1 { *v1 = LIP( *line_map.get(p1).ok_or("Couldn't find transformation")? ); }
+                if let LTT(p2) = v2 { *v2 = LIP( *line_map.get(p2).ok_or("Couldn't find transformation")? ); }
             },
-            Jump(s) => {
-                let v;
-                match s {
-                    LineInProgram(n) => v = SV::L(n),
-                    Coeff(c) => v = SV::F(c),
-                    _ => { println!("crashing bc {}", stringify_partialslpvar(&s));return None;},
-                }
-                slp.push(SL::Compound(( SV::F(Complex64::ZERO), Plus, v )));
-            }
+            Input(_) => (),
         }
     }
-    return Some(slp);
+
+    // convert all Zero to a reference to 0
+    for line in p_slp.iter_mut() {
+        if let Compound((v1, _, v2)) = line {
+            if matches!(v1,Zero) { *v1 = LIP(0); }
+            if matches!(v2,Zero) { *v2 = LIP(0); }
+        }
+    }    
+
+
+    // all LIP in the p_slp need to be reversed to point back to where they should
+    // all LIP need to be increased by one as well as referred to location in SLP without added 0 element
+    //  1 -> p_len-2 and p_len-1 -> 0, note that 0 shouldn't be reversed as it points to an element that is now at the beginning
+    //  so use equation f(x) = p_slp.len() - x - 1
+    let p_len = p_slp.len();
+    for line in p_slp.iter_mut() {
+        match line {
+            Compound(( LIP(0), _, LIP(0) )) => (), // handle cases where we don't want to map 0 first
+            Compound(( LIP(0), _, LIP(n) )) | Compound(( LIP(n), _, LIP(0) )) => *n = p_len-*n-1,
+            Compound(( LIP(0), _, _)) | Compound(( _, _, LIP(0) )) => (),
+            Compound(( LIP(n1), _, LIP(n2) )) => { *n1 = p_len-*n1-1; *n2 = p_len-*n2-1;}
+            Compound(( LIP(n), _, _ )) | Compound(( _, _, LIP(n) )) => *n = p_len-*n-1,
+            _ => (),
+        }
+    }
+
+    // convert PartialSLP to SLP, should be case that all variables are LIP or C
+    use SLPLine::Compound as SLPCompound;
+    use SLPLine::Input as SLPInput;
+    use SLPVar::C as SLPC;
+    use SLPVar::L;
+    let mut slp: SLP<T> = Vec::new();
+    let pv_to_sv = |v: PartialSLPVar<T>| {
+        match v {
+            LIP(n) => Ok(L(n)),
+            C(c) => Ok(SLPC(c.clone())),
+            LTT(_) => Err("Unconverted LTT found"),
+            Zero => Err("Unconverted Zero found"),
+        }
+    };
+    for line in p_slp {
+        slp.push( match line {
+            Compound(( v1, op, v2 )) => SLPCompound(( pv_to_sv(v1)?, op, pv_to_sv(v2)? )),
+            Input(m) => SLPInput(m.clone()),
+        });
+    }
+    Ok(slp)
 }
 
-pub fn transform_x_i_program(init_program: &SLP, vi: &TMatrix) -> Option<SLP> {
-    use SLPLine::*;
-    use Operation::*;
-    let mut metavars_used: MetaVarSet = MetaVarSet::new();
-    let mut line_ref: LineMapper = LineMapper::new();
-    let mut p_program: PartialSLP = PartialSLP::new();
-    
-    let xi_set = HashSet::from([ vi.clone()]);
-    let mut line_parser: LinesToParse = HashMap::from([ (init_program.len()-1, xi_set ) ]);
-
-    let mut program_lines_to_flip: HashSet<usize> = HashSet::new();
-
-    for (lno, line) in init_program.iter().enumerate().rev() {
-        if let None = line_parser.get(&lno) {
-            continue;
-        }
-        let transforms = line_parser.get(&lno).unwrap().clone();
-        for tm in  transforms {
-            insert_into_line_ref(&mut line_ref, lno, tm.clone(), p_program.len() );
-            match line {
-                Input(m) => transform_x_i_input(m, &tm, &mut metavars_used, &mut p_program),
-                Compound((s1, Plus, s2)) => transform_x_i_plus(s1, s2, &tm, &mut p_program, &mut line_parser),
-                Compound((s1, Mult, s2)) => transform_x_i_mult(s1, s2, &tm, &mut p_program, &mut line_parser, &mut program_lines_to_flip),
-            }
-        }
-    }
-
-    // println!("metavars_used: {metavars_used:}");
-    // println!("line_ref: {line_ref:}");
-    // println!("line_parser: {line_parser:}");
-    // println!("p_program: {p_program:}");
-
-
-    // Reverse all line reference values so they now point to where they will be in the list once reversed
-    let flip_line_ref = |prog_len: usize, mvar_len: usize, index: LineVar| { prog_len - index - 1 + mvar_len };
-    line_ref.values_mut().for_each(|m| {
-        m.values_mut().for_each( |v| {*v = flip_line_ref(p_program.len(), metavars_used.len(), *v)} );
-    });
-    // Reverse all line references in the partial program also
-    let p_program_len = p_program.len();
-    program_lines_to_flip.iter().for_each(|lno| {
-        use PartialSLPLine::*;
-        use PartialSLPVar::*;
-        if let Compound(tp) = &mut p_program[*lno] && let (LineInProgram(n1), _, LineInProgram(n2)) = tp {
-            tp.0 = LineInProgram( flip_line_ref(p_program_len, metavars_used.len(), *n1));
-            tp.2 = LineInProgram( flip_line_ref(p_program_len, metavars_used.len(), *n2));
-        } else if let Compound(tp) = &mut p_program[*lno] && let (LineInProgram(n1), _, _) = tp {
-            tp.0 = LineInProgram( flip_line_ref(p_program_len, metavars_used.len(), *n1));
-        } else if let Compound(tp) = &mut p_program[*lno] && let (_, _, LineInProgram(n2)) = tp {
-            tp.2 = LineInProgram( flip_line_ref(p_program_len, metavars_used.len(), *n2));
-        }
-    });
-
-    // Chuck all the metavars onto the end of the program and add references to them in a map structure so references can be utilised
-    let mut metavar_mapper = MetaVarLineMap::new();
-    for (mi,m) in metavars_used.iter().enumerate() {
-        metavar_mapper.insert(m.clone(), metavars_used.len()-1-mi);
-        p_program.push(PartialSLPLine::Input(m.to_vec()));
-    }
-    p_program.reverse();
-
-    // Section 2
-    // 1. Translate all line references in the partial program to be in the right place
-    // 2. Translate all (Matrix, LineNumber) references to be the correct line in the program
-    // 3. Translate all references to metavariables to be the correct line in the program
-    // 4. Apply a zero reduction algorithm to clear the amount of zeros that will probably clog up the output (not done)
-    // 5. Convert the partial program (now only using inputs, zeros and compounds using coeffs and line references) into a program (done without cleanup)
-
-    // step 2 & 3
-    for line in p_program.iter_mut() {
-        if let PartialSLPLine::Compound((s1, op, s2)) = line {
-            use PartialSLPVar::*;
-            let s1: PartialSLPVar = match s1 {
-                LineInProgram(n) => LineInProgram(*n),
-                Coeff(c) => Coeff(*c),
-                LineToTranslate((tm, n)) => LineInProgram(line_ref[n][tm]),
-                MetaVarRef(m) => LineInProgram( metavar_mapper[m] ),
-            };
-            let s2: PartialSLPVar = match s2 {
-                LineInProgram(n) => LineInProgram(*n),
-                Coeff(c) => Coeff(*c),
-                LineToTranslate((tm, n)) => LineInProgram(line_ref[n][tm]),
-                MetaVarRef(m) => LineInProgram( metavar_mapper[m] ),
-            };
-            *line = PartialSLPLine::Compound((s1, *op, s2));
-        }
-    }
-    // println!("Modified partial program:\n{}", stringify_partialslp(&p_program));
-
-
-    translate_partial_to_slp_cheat(p_program)
-}
-
-
-pub fn transform_x_i_product_program(init_program: &SLP, eij_s: &Vec<(usize, usize)>, k: usize) -> Option<SLP> {
-    use SLPLine::*;
-    use SLPVar::*;
-    let mut slp: SLP = init_program.clone();
-    for (i,j) in eij_s {
-        let mut vi = vec![0;k*k];
-        vi[i * k + j] = 1;
-        slp = transform_x_i_program(&slp, &vi)?;
-    }
-    Some(slp)
+/// apply_eijs_on_program computes the transformations applied to the program in REVERSE order (as function application is carried out that way)
+/// slp is the straight line program
+/// eijs is the vector of transformations, to be applied in order of last to first
+/// u32_to_c is a function converting a u32 to the custom coefficient type T, ensure that u32_to_c(0) is sensible (ie. is 0 in your vector field)
+/// returns result of slp or error message about first failure
+pub fn apply_eijs_on_program<T, F>(slp: &SLP<T>, eijs: &Vec<(usize, usize)>, u32_to_c: F) -> Result<SLP<T>,String>
+where
+    T: Clone + Display,
+    F: Fn(u32) -> T + Copy,
+{
+    eijs.iter().enumerate().rev().try_fold(slp.clone()
+    , |s, (i, &eij)| apply_eij_on_program(&s, eij, u32_to_c).map_err(|err| format!("Failure index {i}, Error: {err}, SLP: {}", stringify_slp(&s)))
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsing;
+    use crate::evaluation;
+    use num_rational::Rational64;
 
     #[test]
-    fn apply_x_i_input_test() {
-        // Hand calculated X^i . c<1,3,2>: X^i expressed as i = (0,0,1,0,2,0,0,0,0) in R^9 on c<1,3,2> should be 18*c<2,3,1>
-        let expected = Some((vec![2,3,1], Complex64::ONE.scale(18.0) ));
-        let mut hs = MetaVarSet::new();
-        let result = apply_x_i_input(&vec![1,3,2], &vec![0,0,1,0,2,0,0,0,0],&mut hs);
-        println!("metavars: {hs:?}");
-        assert_eq!(expected, result);
+    fn apply_x_i_test() {
+        // let slp_str = "=C<1,2,3,4>\n=L0*L0";
+        let slp_str = "=C<0,0,2>
+=C<0,2,0>
+=C<2,0,0>
+=L0*L1
+=L3*L2";
+        let eij = (0,0);
+        let slp = parsing::slp_parser_rational(slp_str).expect("Should parse SLP");
+        let slp_res = apply_eij_on_program(&slp, eij, |n| Rational64::from_integer(n.into())).expect("Should apply Eij on SLP");
+
+        println!("Transformation: {eij:?} Parsed SLP:{}\n", stringify_slp(&slp));
+        println!("Result SLP:{}\n", stringify_slp(&slp_res));
+
+        let dist = evaluation::RationalDistr {};
+        let mut rng = rand::rng();
+        let metavar_point = evaluation::get_random_val_for_metavars(&slp_res, &dist, &mut rng);
+
+        let expected_slp_str = "=C<0,0,2>
+=C<0,2,0>
+=C<2,0,0>
+=L0*L1
+=L3*L2
+=2*L4";
+        let expected_slp = parsing::slp_parser_rational(expected_slp_str).expect("Should parse expected SLP");
+
+        println!("Expected SLP:{}\n", stringify_slp(&expected_slp));
+        println!("Evaluated at: {metavar_point:?}");
+
+        assert!( evaluation::are_slps_similar(&metavar_point, &slp_res, &expected_slp) );
     }
 
-    #[test]
-    fn get_all_subvecs_i_test() {
-        let v = vec![1,2,3];
-        let i = 2;
-        let expected = HashSet::from( [ vec![0,1,3], vec![0,2,2], vec![1,0,3], vec![1,1,2], vec![1,2,1] ]) ;
-        let result = get_all_subvecs_i(&v, i);
-        let mut hash_res: HashSet<Vec<u32>> = HashSet::new();
-        result.iter().for_each(|v| { hash_res.insert(v.clone()); });
-        println!("got result: {result:?}");
-        assert_eq!(expected, hash_res);
-    }
-
-    #[test]
-    fn transform_x_i_mult_test1() {
-        use SLPVar::L;
-        let s1 = L(101);
-        let s2 = L(202);
-        let vi = vec![0,0,1,0,0,0,0,0,0];
-        let mut p_program: PartialSLP = Vec::new();
-        let mut lines_to_parse: LinesToParse = HashMap::new();
-        let mut lines_to_flip: HashSet<usize> = HashSet::new();
-
-        transform_x_i_mult(&s1, &s2, &vi, &mut p_program, &mut lines_to_parse, &mut lines_to_flip);
-        println!("Partial Program: {p_program:?}");
-        println!("lines to parse: {lines_to_parse:?}");
-        println!("lines to flip: {lines_to_flip:?}");
-        assert_eq!(1,1);
-    }
 }
