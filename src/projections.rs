@@ -14,6 +14,7 @@ type LASum<T> = Vec<T>;
 type LAProd<T> = Vec<T>;
 
 /// find casimir finds the pth casimir element for the casimir elements of k variables
+/// p is 1 indexed
 fn find_casimir(p: usize, k: usize) -> LASum<LAProd<(usize, usize)>> {
     let mut q = Vec::new();
     q.push(Vec::new());
@@ -42,6 +43,7 @@ fn find_casimir(p: usize, k: usize) -> LASum<LAProd<(usize, usize)>> {
     summation
 }
 
+use itertools::Itertools;
 use nalgebra::DMatrix;
 /// casimir_eigenval finds an eigenvalue of a casimir element wrt partition lambda, given by p, the index of the casimir number
 /// casimir_num is the index of the casimir number
@@ -215,7 +217,7 @@ where
 
         // apply U_{mu}
         let mu_c = find_casimir(*el_index, k); // find mu's casimir element (U_{\mu})
-        println!("Casimir found: {mu_c:?}, index: {el_index}");
+        // println!("Casimir found: {mu_c:?}, index: {el_index}");
         // calculate each product of Eij in U{\mu}
         let mut mu_c_slp_summands: LASum<SLP<T>> = vec![];
         for eij_prod in  mu_c {
@@ -291,7 +293,7 @@ use std::collections::HashMap;
 /// v is a vector of pairs (usize, T) representing a term in the product of the form (C_n, \Chi_{n}(C_n)) representing (C_n - \Chi_{n}(C_n))
 /// unit is the representative of 1 in T
 /// returns the list of projections to apply and sum together
-fn eval_proj_pairs<T>(v: &[(usize, T)], unit: T) -> HashMap<Vec<usize>, T>
+fn eval_proj_pairs<T>(v: &[(usize, T)], unit: T) -> HashMap<LAProd<usize>, T>
 where T: Mul<Output=T> + Add<Output=T> + Clone + Debug,
 {
     if v.len() == 0 { HashMap::new() }
@@ -315,6 +317,99 @@ where T: Mul<Output=T> + Add<Output=T> + Clone + Debug,
         }
         res
     }
+}
+
+/// casimir_prod_to_sorted_basis_matrices
+fn casimir_prod_to_sorted_basis_matrices(prod: &[usize], k: usize) -> HashMap<LAProd<(usize,usize)>, i64>
+{
+    let counts = prod.iter().map(|u| find_casimir(*u, k)).multi_cartesian_product().map(|v| v.concat()).counts(); // have distributed out product and collected counts
+    counts.into_iter().map(|(k,v)|{
+        let mut sorted = pbw_reduce(&k[..]);
+        sorted.iter_mut().for_each(|(_,vs)| *vs *= v as i64); 
+        sorted
+    }).flatten().into_grouping_map().sum()
+}
+
+/// casimir_eq_to_sorted_basis_matrices
+/// TODO: explain how this works, still got no clue how to test it
+fn casimir_eq_to_sorted_basis_matrices(sum: &Vec<Vec<usize>>, k: usize) -> HashMap<LAProd<(usize, usize)>, i64> {
+    sum.into_iter().map(|v| casimir_prod_to_sorted_basis_matrices(v, k)).flatten().into_grouping_map().sum()
+}
+
+use std::cmp::Ordering;
+/// SwapsItem allows the sorting of lists of swaps by their length, allowing the usage of the binary heap structure
+///  items of same length are sorted lexigraphically, meaning items furthest to being sorted are sorted first and hence we won't repeat
+#[derive(Eq,PartialEq,Clone,Hash,Debug)]
+struct SwapsItem(Vec<(usize,usize)>);
+impl Ord for SwapsItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if other.0.len() == self.0.len() { // if lengths are same, reports it lexigraphically
+            self.0.cmp(&other.0)
+        } else {
+            self.0.len().cmp(&other.0.len())
+        }
+    }
+}
+impl PartialOrd for SwapsItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// TODO: later reminder to self, this list of lists tells us how to accomplish partial computation as well, any suffix in this list implies 
+//        we can compute that suffix in the slp first and appropriately reference the correct line.
+
+use std::collections::BTreeSet;
+/// pbw_reduce takes an unsorted array of basis elements E_ij and sorts it, adding other sorted terms such that the transformations stay equal
+/// swaps is the array of basis elements
+/// returns hashmap representing the terms in the sum of an equation equal to the original swaps, all other terms are of smaller length 
+fn pbw_reduce(swaps: &[(usize,usize)]) -> HashMap<Vec<(usize,usize)>, i64> {
+    let mut bin_heap: BTreeSet<SwapsItem> =  BTreeSet::new();
+    let mut signs: HashMap<Vec<(usize,usize)>, i64> =  HashMap::new();
+    let mut result: HashMap<Vec<(usize,usize)>, i64> =  HashMap::new();
+    bin_heap.insert( SwapsItem(Vec::from(swaps)) );
+    signs.insert(Vec::from(swaps),1);
+
+    while let Some(SwapsItem(mut swaps)) = bin_heap.pop_last() {
+        let coeff = signs.remove(&swaps).unwrap();
+        if coeff == 0 { // if coeff is 0 then this computation should be skipped
+            continue;
+        }
+        // find first adjacent pair not lexigraphically in order by index
+        let i = swaps.windows(2).find_position(|w| w[0] > w[1] ).map(|p| p.0);
+        if let Some(i) = i { // found index needing swapping
+            // ..,(i,j),(k,l),.. -> ..,(k,l),(i,j),.. + ..,[(i,j),(k,l)],..
+            if swaps[i].1 == swaps[i+1].0 {
+                let mut term1 =  swaps.clone();
+                term1[i] = ( swaps[i].0, swaps[i+1].1 );
+                term1.remove(i+1);
+                if let Some(s) = signs.get_mut(&term1) {
+                    *s += coeff;
+                } else { signs.insert(term1.clone(), coeff); }
+                bin_heap.insert(SwapsItem(term1));
+            }
+            if swaps[i].0 == swaps[i+1].1 {
+                let mut term2 =  swaps.clone();
+                term2[i] = ( swaps[i+1].0, swaps[i].1 );
+                term2.remove(i+1);
+                if let Some(s) = signs.get_mut(&term2) {
+                    *s -= coeff;
+                } else { signs.insert(term2.clone(), -coeff); }
+                bin_heap.insert(SwapsItem(term2));
+            }
+
+            swaps.swap(i,i+1);
+            if let Some(s) = signs.get_mut(&swaps) {
+                *s += coeff;
+            } else { signs.insert(swaps.clone(), coeff); }
+            bin_heap.insert(SwapsItem(swaps));
+
+        } else { // no index needing swapping: sorted this element
+            result.insert(swaps, coeff);
+        }
+    }
+
+    result
 }
 
 /// apply_candidate_partitions_to_slp2 applies all candidate
@@ -351,7 +446,7 @@ where
 
     let mut summands = Vec::new();
     for (proj_s, c) in expanded {
-        println!("Proj: {proj_s:?}");
+        // println!("Proj: {proj_s:?}");
         let mut slp_term = proj_s.into_iter().try_fold(slp.clone(),
          |acc, proj| apply_casimir_to_slp(&acc, proj, k, |x| i64_to_c(x as i64))
         )?;
@@ -468,5 +563,50 @@ mod tests {
         println!("{}", stepwise_slp_to_poly(&res_slp, Rational64::ONE));
         println!("{:?}", stepwise_slp_to_poly(&proj_slp, Rational64::ONE).split("\n").last());
         assert!(are_rational_slp_similar(&res_slp, &proj_slp).1);
+    }
+
+    #[test]
+    fn test_projection_example_5_4_is_same_as_distinguishing_partitions() {
+        let slp_str = "=C<0,0,2>
+=C<0,2,0>
+=C<2,0,0>
+=L0*L1
+=L3*L2";
+        let slp = slp_parser_rational(slp_str).unwrap();
+        let lambda = vec![6,0,0];
+        let distinguishing_parts = find_distinguishing_parts_and_indices(&lambda);
+
+        let i64_to_c = |i| { Rational64::new(i,1) };
+        let unit = Rational64::ONE;
+        let mut proj_slp = apply_candidate_partitions_to_slp2(slp, &lambda, &distinguishing_parts, i64_to_c, unit).unwrap();
+        scale_slp(&mut proj_slp, Rational64::new(60,1) );
+
+        let mut res_str: String = String::new();
+        File::open("example_5_4_proj.txt").unwrap().read_to_string(&mut res_str).unwrap();
+        let res_slp = slp_parser_rational(&res_str).unwrap();
+
+        println!("{:?}", stepwise_slp_to_poly(&proj_slp, Rational64::ONE).split("\n").last());
+        assert!(are_rational_slp_similar(&res_slp, &proj_slp).1);
+    }
+
+    #[test]
+    fn test_pbw_reduce_trivials() {
+        let starting = &[(2,2),(1,1),(0,0)]; // needs to be sorted but commutator always 0
+        let starting2 = &[(0,1),(1,2),(2,2)]; // already sorted
+        assert_eq!(pbw_reduce(starting), HashMap::from([(vec![(0,0),(1,1),(2,2)],1)]) );
+        assert_eq!(pbw_reduce(starting2), HashMap::from([(vec![(0,1),(1,2),(2,2)],1)]) );
+    }
+
+    #[test]
+    fn test_pbw_reduce_nontrivials() {
+        let starting = &[(2,1),(1,0),(1,2)]; 
+        // [21,10,12] -> [10,21,12]+[20,12] -> [10,12,21]+[10,22]-[10,11]+[20,12] -> [10,12,21]+[10,22]-[10,11]+[12,20]-[10]
+        println!("{:?}", pbw_reduce(starting));
+    }
+
+    #[test]
+    fn test_casimir_prod_sorting() {
+        let casimirs = vec![vec![1,2,3],vec![2,1]];
+        println!("{:?}", casimir_eq_to_sorted_basis_matrices(&casimirs, 3).len());
     }
 }
