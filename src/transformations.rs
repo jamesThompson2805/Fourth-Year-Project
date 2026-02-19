@@ -372,6 +372,14 @@ where
     )
 }
 
+pub fn apply_eij_poly_on_program<T,F>(slp: &SLP<T>, eijs: &HashMap<Vec<(usize,usize)>,i64>, i32_to_c: F) 
+where
+    T: Clone + Display,
+    F: Fn(i32) -> T + Copy
+{
+    unimplemented!()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

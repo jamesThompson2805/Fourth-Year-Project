@@ -49,10 +49,10 @@ use nalgebra::DMatrix;
 /// casimir_num is the index of the casimir number
 /// lambda is the partition to find the eigenvalue with respect to
 /// k is the number of variables of the metapolynomial, and the length of the partition and the 
-fn casimir_eigenval(casimir_num: u32, lambda: &Vec<u32>, k: usize) -> i64 {
-    let a = DMatrix::<i64>::from_fn(k, k, |i, j| {
+fn casimir_eigenval(casimir_num: u32, lambda: &Vec<u32>, k: usize) -> i32 {
+    let a = DMatrix::<i32>::from_fn(k, k, |i, j| {
         if i==j {
-            lambda[i] as i64 + k as i64 - i as i64 - 1
+            lambda[i] as i32 + k as i32 - i as i32 - 1
         } else if i<j {
             -1
         } else {
@@ -60,7 +60,7 @@ fn casimir_eigenval(casimir_num: u32, lambda: &Vec<u32>, k: usize) -> i64 {
         }
     });
     let a_pow_p = a.pow(casimir_num);
-    let e = DMatrix::<i64>::from_element(k, k, 1);
+    let e = DMatrix::<i32>::from_element(k, k, 1);
 
     (a_pow_p * e).trace()
 }
@@ -196,10 +196,10 @@ use std::ops::{Add, Sub, Mul, Div};
 /// i64_to_c is a function converting integers into the coefficient object, it should be sensible wrt numerical operations and default, i64_to_c(0) = 0
 /// unit should be the multiplicative identity of the vector space being used for T
 /// returns a result of either the projected slp or an error message detailing the issue
-fn apply_candidate_partitions_to_slp<T,F>(slp: SLP<T>, lambda: &Vec<u32>, partitions: &Vec<(Vec<u32>, usize)>, i64_to_c: F, unit: T) -> Result<SLP<T>, String>
+fn apply_candidate_partitions_to_slp<T,F>(slp: SLP<T>, lambda: &Vec<u32>, partitions: &Vec<(Vec<u32>, usize)>, i32_to_c: F, unit: T) -> Result<SLP<T>, String>
 where 
     T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T> + Debug,
-    F: Fn(i64) -> T,
+    F: Fn(i32) -> T,
 {
     // steps of finding the projection:
     // 1. Find all candidate partitions (provided by partitions)
@@ -221,7 +221,7 @@ where
         // calculate each product of Eij in U{\mu}
         let mut mu_c_slp_summands: LASum<SLP<T>> = vec![];
         for eij_prod in  mu_c {
-            let transformed_res= apply_eijs_on_program(&slp, &eij_prod, |x| i64_to_c(x as i64));
+            let transformed_res= apply_eijs_on_program(&slp, &eij_prod, |x| i32_to_c(x as i32));
             match transformed_res {
                 Ok(transform_slp) => mu_c_slp_summands.push(transform_slp),
                 Err(s) => return Err( format!("Failure at partition {mu:?}, error{s}, SLP:\n{}", stringify_slp(&slp))),
@@ -235,10 +235,10 @@ where
     
         // transform term2 by chi_{mu}
         let mut slp_chi_mu_scaled = slp.clone();
-        scale_slp(&mut slp_chi_mu_scaled, (T::default() - unit.clone()) * dbg!( i64_to_c(casimir_eigenval(dbg!(*el_index as u32), dbg!(&mu), k)) ) );
+        scale_slp(&mut slp_chi_mu_scaled, (T::default() - unit.clone()) * dbg!( i32_to_c(casimir_eigenval(dbg!(*el_index as u32), dbg!(&mu), k)) ) );
 
         let mut slp_prod_term = add_slp(mu_c_applied_slp, slp_chi_mu_scaled);
-        let scalar = unit.clone() / ( i64_to_c(casimir_eigenval(*el_index as u32, lambda, k)) - i64_to_c(casimir_eigenval(*el_index as u32, &mu, k)) );
+        let scalar = unit.clone() / ( i32_to_c(casimir_eigenval(*el_index as u32, lambda, k)) - i32_to_c(casimir_eigenval(*el_index as u32, &mu, k)) );
         scale_slp(&mut slp_prod_term, scalar);
 
         slp_product.push(slp_prod_term);
@@ -265,10 +265,10 @@ where
 /// i64_to_c is a function converting integers into the coefficient object, it should be sensible wrt numerical operations and default, i64_to_c(0) = 0
 /// unit should be the multiplicative identity of the vector space being used for T
 /// returns a result of either the projected slp or an error message detailing the issue
-pub fn apply_projection_to_slp<T, F>(slp: SLP<T>, lambda: &Vec<u32>, i64_to_c: F, unit: T) -> Result<SLP<T>, String>
+pub fn apply_projection_to_slp<T, F>(slp: SLP<T>, lambda: &Vec<u32>, i32_to_c: F, unit: T) -> Result<SLP<T>, String>
 where
     T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T> + Debug,
-    F: Fn(i64) -> T,
+    F: Fn(i32) -> T,
 
 {
     // steps of finding the projection:
@@ -284,7 +284,7 @@ where
         println!("Found partition {partition:?}, with casimir el index: {el_index}");
     });
 
-    apply_candidate_partitions_to_slp(slp, lambda, &distinguishing_partitions, i64_to_c, unit)
+    apply_candidate_partitions_to_slp(slp, lambda, &distinguishing_partitions, i32_to_c, unit)
 }
 
 use std::collections::HashMap;
@@ -320,19 +320,19 @@ where T: Mul<Output=T> + Add<Output=T> + Clone + Debug,
 }
 
 /// casimir_prod_to_sorted_basis_matrices
-fn casimir_prod_to_sorted_basis_matrices(prod: &[usize], k: usize) -> HashMap<LAProd<(usize,usize)>, i64>
+fn casimir_prod_to_sorted_basis_matrices(prod: &[usize], k: usize) -> HashMap<LAProd<(usize,usize)>, i32>
 {
     let counts = prod.iter().map(|u| find_casimir(*u, k)).multi_cartesian_product().map(|v| v.concat()).counts(); // have distributed out product and collected counts
     counts.into_iter().map(|(k,v)|{
         let mut sorted = pbw_reduce(&k[..]);
-        sorted.iter_mut().for_each(|(_,vs)| *vs *= v as i64); 
+        sorted.iter_mut().for_each(|(_,vs)| *vs *= v as i32); 
         sorted
     }).flatten().into_grouping_map().sum()
 }
 
 /// casimir_eq_to_sorted_basis_matrices
 /// TODO: explain how this works, still got no clue how to test it
-fn casimir_eq_to_sorted_basis_matrices(sum: &Vec<Vec<usize>>, k: usize) -> HashMap<LAProd<(usize, usize)>, i64> {
+fn casimir_eq_to_sorted_basis_matrices(sum: &Vec<Vec<usize>>, k: usize) -> HashMap<LAProd<(usize, usize)>, i32> {
     sum.into_iter().map(|v| casimir_prod_to_sorted_basis_matrices(v, k)).flatten().into_grouping_map().sum()
 }
 
@@ -363,10 +363,10 @@ use std::collections::BTreeSet;
 /// pbw_reduce takes an unsorted array of basis elements E_ij and sorts it, adding other sorted terms such that the transformations stay equal
 /// swaps is the array of basis elements
 /// returns hashmap representing the terms in the sum of an equation equal to the original swaps, all other terms are of smaller length 
-fn pbw_reduce(swaps: &[(usize,usize)]) -> HashMap<Vec<(usize,usize)>, i64> {
+fn pbw_reduce(swaps: &[(usize,usize)]) -> HashMap<Vec<(usize,usize)>, i32> {
     let mut bin_heap: BTreeSet<SwapsItem> =  BTreeSet::new();
-    let mut signs: HashMap<Vec<(usize,usize)>, i64> =  HashMap::new();
-    let mut result: HashMap<Vec<(usize,usize)>, i64> =  HashMap::new();
+    let mut signs: HashMap<Vec<(usize,usize)>, i32> =  HashMap::new();
+    let mut result: HashMap<Vec<(usize,usize)>, i32> =  HashMap::new();
     bin_heap.insert( SwapsItem(Vec::from(swaps)) );
     signs.insert(Vec::from(swaps),1);
 
@@ -426,10 +426,10 @@ fn pbw_reduce(swaps: &[(usize,usize)]) -> HashMap<Vec<(usize,usize)>, i64> {
 /// i64_to_c is a function converting integers into the coefficient object, it should be sensible wrt numerical operations and default, i64_to_c(0) = 0
 /// unit should be the multiplicative identity of the vector space being used for T
 /// returns a result of either the projected slp or an error message detailing the issue
-fn apply_candidate_partitions_to_slp2<T,F>(slp: SLP<T>, lambda: &Vec<u32>, partitions: &Vec<(Vec<u32>, usize)>, i64_to_c: F, unit: T) -> Result<SLP<T>, String>
+fn apply_candidate_partitions_to_slp2<T,F>(slp: SLP<T>, lambda: &Vec<u32>, partitions: &Vec<(Vec<u32>, usize)>, i32_to_c: F, unit: T) -> Result<SLP<T>, String>
 where 
     T: Clone + Display + Default + Sub<Output=T> + Mul<Output=T> + Div<Output=T> + Add<Output=T> + Debug + PartialEq,
-    F: Fn(i64) -> T,
+    F: Fn(i32) -> T,
 {
     // steps of finding the projection:
     // 1. Find all candidate partitions (provided by partitions)
@@ -440,7 +440,7 @@ where
     let k = dbg!(lambda.len());
     if partitions.iter().any(|(v,_)| v.len() != k) { return Err(String::from("Partitions not all same length")); }
 
-    let terms: Vec<(usize, T)> = partitions.iter().map(|(v,i)| ( *i, (T::default() - unit.clone()) * i64_to_c(casimir_eigenval((*i) as u32, v, k)) )).collect();
+    let terms: Vec<(usize, T)> = partitions.iter().map(|(v,i)| ( *i, (T::default() - unit.clone()) * i32_to_c(casimir_eigenval((*i) as u32, v, k)) )).collect();
     let expanded = eval_proj_pairs(&terms.as_slice(), unit.clone());
     let _ = dbg!(&expanded);
 
@@ -448,7 +448,7 @@ where
     for (proj_s, c) in expanded {
         // println!("Proj: {proj_s:?}");
         let mut slp_term = proj_s.into_iter().try_fold(slp.clone(),
-         |acc, proj| apply_casimir_to_slp(&acc, proj, k, |x| i64_to_c(x as i64))
+         |acc, proj| apply_casimir_to_slp(&acc, proj, k, |x| i32_to_c(x as i32))
         )?;
         scale_slp(&mut slp_term, c);
         summands.push( slp_term );
@@ -458,7 +458,7 @@ where
     let mut slp_res = summands.into_iter().skip(1).fold(first, |acc, term| add_slp(acc, term));
 
     let denom_scale = partitions.iter().map(
-        |(v,i)| i64_to_c(casimir_eigenval((*i) as u32, lambda, k)) - i64_to_c(casimir_eigenval((*i) as u32, v, k))
+        |(v,i)| i32_to_c(casimir_eigenval((*i) as u32, lambda, k)) - i32_to_c(casimir_eigenval((*i) as u32, v, k))
     ).reduce(|acc,e| acc * e).ok_or("partitions is empty")?;
 
     scale_slp( &mut slp_res,  unit / denom_scale );
@@ -555,9 +555,9 @@ mod tests {
         let res_slp = slp_parser_rational(&res_str).unwrap();
         // scale_slp(&mut res_slp, Rational64::new(1,60) );
 
-        let i64_to_c = |i| { Rational64::new(i,1) };
+        let i32_to_c = |i| { Rational64::new(i as i64,1) };
         let unit = Rational64::ONE;
-        let mut proj_slp = apply_candidate_partitions_to_slp2(slp, &lambda, &distinguishing_parts, i64_to_c, unit).unwrap();
+        let mut proj_slp = apply_candidate_partitions_to_slp2(slp, &lambda, &distinguishing_parts, i32_to_c, unit).unwrap();
         scale_slp(&mut proj_slp, Rational64::new(60,1) );
         // println!("{}", stepwise_slp_to_poly(&proj_slp, Rational64::ONE));
         println!("{}", stepwise_slp_to_poly(&res_slp, Rational64::ONE));
@@ -576,9 +576,9 @@ mod tests {
         let lambda = vec![6,0,0];
         let distinguishing_parts = find_distinguishing_parts_and_indices(&lambda);
 
-        let i64_to_c = |i| { Rational64::new(i,1) };
+        let i32_to_c = |i| { Rational64::new(i as i64,1) };
         let unit = Rational64::ONE;
-        let mut proj_slp = apply_candidate_partitions_to_slp2(slp, &lambda, &distinguishing_parts, i64_to_c, unit).unwrap();
+        let mut proj_slp = apply_candidate_partitions_to_slp2(slp, &lambda, &distinguishing_parts, i32_to_c, unit).unwrap();
         scale_slp(&mut proj_slp, Rational64::new(60,1) );
 
         let mut res_str: String = String::new();
