@@ -2,11 +2,13 @@
 #![allow(dead_code)]
 use std::fmt::Display;
 
-use crate::evaluation::stepwise_slp_to_poly;
-
 use super::straight_line_program::SLP;
 use super::straight_line_program::{add_slp, mult_slp, scale_slp};
 use super::straight_line_program::stringify_slp;
+
+use crate::transformations::*;
+use std::fmt::Debug;
+use std::ops::{Add, Sub, Mul, Div};
 
 /// LASum wraps a vector denoting a collection of terms to be summed together
 type LASum<T> = Vec<T>;
@@ -176,9 +178,6 @@ where T: Clone + Display, F: Fn(u32) -> T,
     )
 }
 
-use super::transformations::*;
-use std::fmt::Debug;
-use std::ops::{Add, Sub, Mul, Div};
 
 
 /// Will not worK! (multiplication doesn't work)
