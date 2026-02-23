@@ -43,23 +43,23 @@ type LinesToTransform = HashMap<usize, Transforms>;
 type LineMap = HashMap<(usize, bool), usize>;
 
 /// PartialSLPVar is a structure mimicking SLPVar but in an unfinished format allowing it to be converted to a valid SLPVar later
-pub enum PartialSLPVar<T> {
+enum PartialSLPVar<T> {
     LIP(usize), // LineInPartial is index of an earlier line in the transformed partial slp
     LTT((usize, bool)), // LineToTranslate, bool represents whether it should be transformed by eij or not
     C(T),
     Zero,
 }
 /// PartialSLPLine is a structure mimicking SLPLine but in an unfinished format allowing it to be converted to it later
-pub enum PartialSLPLine<T> {
+enum PartialSLPLine<T> {
     Input(MetaVar),
     Compound((PartialSLPVar<T>, Operation, PartialSLPVar<T>)),
 }
 /// PartialSLPis a structure mimicking SLPbut in an unfinished format allowing it to be converted to it later
-pub type PartialSLP<T> = Vec<PartialSLPLine<T>>;
+type PartialSLP<T> = Vec<PartialSLPLine<T>>;
 
 use std::fmt::Display;
 /// stringify_partialslpvar returns string presentation of partialslpvar for debugging
-pub fn stringify_partialslpvar<T: Display>(var: &PartialSLPVar<T>) -> String {
+fn stringify_partialslpvar<T: Display>(var: &PartialSLPVar<T>) -> String {
     use PartialSLPVar::*;
     match var {
         LTT((lno, transforming)) => format!("LTT({lno},T?{transforming})"),
@@ -69,7 +69,7 @@ pub fn stringify_partialslpvar<T: Display>(var: &PartialSLPVar<T>) -> String {
     }
 }
 /// stringify_partialslpline returns string presentation of partialslpline for debugging
-pub fn stringify_partialslpline<T: Display>(line: &PartialSLPLine<T>) -> String {
+fn stringify_partialslpline<T: Display>(line: &PartialSLPLine<T>) -> String {
     use PartialSLPLine::*;
     match line {
         Input(m) => format!(
@@ -92,7 +92,7 @@ pub fn stringify_partialslpline<T: Display>(line: &PartialSLPLine<T>) -> String 
     }
 }
 /// stringify_partialslp returns string presentation of partialslp for debugging
-pub fn stringify_partialslp<T: Display>(p_slp: &PartialSLP<T>) -> String {
+fn stringify_partialslp<T: Display>(p_slp: &PartialSLP<T>) -> String {
     p_slp
         .iter()
         .enumerate()
