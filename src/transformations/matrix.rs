@@ -185,11 +185,11 @@ where
         p_slp.push(Compound((C(i32_to_c(coeff as i32)), Mult, LIP(p_slp_len + 1))));
         p_slp.push(Input(m_new));
         // add reference to the new entry point for Eij . m into the line mapper
-        insert_lm::<K>(line_map, lno, eijl2m::<K>(&eijlist), p_slp_len);
+        insert_lm(line_map, lno, eijl2m::<K>(&eijlist), p_slp_len);
     } else {
         // result is 0
         // know that by rules of SLP, a line cannot refer to itself => in p_slp will never have variable of LIP(0) hence this is reserved for 0
-        insert_lm::<K>(line_map, lno, eijl2m::<K>(&eijlist), 0);
+        insert_lm(line_map, lno, eijl2m::<K>(&eijlist), 0);
     }
 }
 
@@ -255,10 +255,9 @@ fn apply_transform_on_addition<T, const K: usize>(
     p_slp: &mut PartialSLP<T,K>,
     l2t_input: &mut LinesToTransform<K>, // both should be l2t_slp for when transforming the current slp
     l2t_slp: &mut LinesToTransform<K>,
-    curr_prog_to_trans: &mut LinesToTransform<K>,
     line_map: &mut LineMap<K>,
     tries: &HashMap<usize, Trie<EijList, usize>>,
-    is_input_slp: bool,
+    is_input_slp: bool, // boolean for whether line comes from the input slp or the current slp
 ) { // TODO : Write this logic on paper, ensures works
     use Operation::*;
     use PartialSLPLine::*;
@@ -268,16 +267,6 @@ fn apply_transform_on_addition<T, const K: usize>(
         (L(n1), L(n2)) => {
             let n1_var = transform_lno_efficiently(l2t_input, l2t_slp, *n1, transform.clone(), tries, is_input_slp);
             let n2_var = transform_lno_efficiently(l2t_input, l2t_slp, *n2, transform.clone(), tries, is_input_slp);
-            let n1_var;
-            if let Some((n1_lno,anc_len)) = n1_res {
-                let t_clone = transform.clone();
-                matrix_remove_last_n_transforms(&mut t_clone, anc_len as u32);
-                n1_var = LTTCP((n1_lno, t_clone));
-            } else if is_input_slp {
-                n1_var = LTTCP((*n1, transform.clone()));
-            } else {
-                n1_var = LTT((*n1, transform.clone()));
-            }
 
             p_slp.push(Compound(( n1_var, Plus, n2_var )));
             insert_lm(line_map, lno, transform.clone(), p_slp.len() - 1);
@@ -287,6 +276,74 @@ fn apply_transform_on_addition<T, const K: usize>(
             p_slp.push(Compound(( n_var, Plus, LIP(0) )));
 
             insert_lm(line_map, lno, transform.clone(), p_slp.len() - 1);
+        }
+        (C(_), C(_)) => insert_lm(line_map, lno, transform.clone(), 0),
+    }
+}
+
+/// get_all_sub_transforms takes a matrix and returns all others with entries smaller than the original
+fn get_all_sub_transforms<const K:usize>(m: [u32;K]) -> Vec<[u32;K]> {
+    let mut q: Vec<[u32;K]> = vec![m];
+    for (i,el) in m.iter().enumerate() {
+        if *el == 0 { continue; }
+        q = q.iter().map(|v|
+            (0..=*el).iter().map(|j| {
+                let clone = v.clone();
+                clone[i] = j;
+                clone
+            })
+        ).flatten().collect();
+    }
+    q
+}
+
+/// apply_eij_on_product computes the transformation of a product line (=L2*0.5) under eij
+/// This involves updating the partial structures used to build the final slp: p_slp and line_map
+/// v1 the the first term in the line
+/// v2 the the second term in the line
+/// lno is the line number of this Input line in the original SLP, needed to give the key for line_map
+/// p_slp is the partial slp structure being built to be converted into a slp, it is being built backwards
+/// lines_to_trans is a dictionary of other lines that also need to be included into the partial slp
+/// line_map is a dictionary mapping original line numbers and to their current index in the partial slp structure
+fn apply_transform_on_product<T: Clone, const K: usize>(
+    v1: &SLPVar<T,K>,
+    v2: &SLPVar<T,K>,
+    transform: &[u32;K],
+    lno: usize,
+    p_slp: &mut PartialSLP<T,K>,
+    l2t_input: &mut LinesToTransform<K>, // both should be l2t_slp for when transforming the current slp
+    l2t_slp: &mut LinesToTransform<K>,
+    line_map: &mut LineMap<K>,
+    tries: &HashMap<usize, Trie<EijList, usize>>,
+    is_input_slp: bool, // boolean for whether line comes from the input slp or the current slp
+) {
+    use Operation::*;
+    use PartialSLPLine::*;
+    use PartialSLPVar::C as PC;
+    use PartialSLPVar::{LIP, LTT, Zero};
+    use SLPVar::*;
+    let p_len = p_slp.len();
+    match (v1, v2) {
+        (L(n1), L(n2)) => {
+            let all_subvecs = get_all_sub_transforms(transform.clone());
+            for (i, subvec) in all_subvecs.into_iter().enumerate() {
+                let subvec_minus = subvec.iter().enumerate().map(|(i,el)| transform[i]-el).collect::<[u32;K]>();
+                n1_var = transform_lno_efficiently(l2t_input, l2t_slp, *n1, subvec, tries, is_input_slp);
+                n2_var = transform_lno_efficiently(l2t_input, l2t_slp, *n2, subvec_minus, tries, is_input_slp);
+                if i != all_subvecs.len()-1 { // if not the final iteration
+                    p_slp.push(Compound(( LIP(p_slp.len()+1), Plus, LIP(p_slp.len()+2) )));
+                }
+                p_slp.push(Compound(( n1_var, Mult, n2_var )));
+
+            }
+
+            insert_lm(line_map, lno, transform.clone(), p_slp.len()-1);
+        }
+        (L(n), C(c)) | (C(c), L(n)) => {
+            let n_var = transform_lno_efficiently(l2t_input, l2t_slp, *n, transform.clone(), tries, is_input_slp);
+            p_slp.push(Compound(( PartialSLPVar::C(c.clone()), Mult, n_var )));
+
+            insert_lm(line_map, lno, transform.clone(), p_slp.len()-1);
         }
         (C(_), C(_)) => insert_lm(line_map, lno, transform.clone(), 0),
     }
