@@ -246,23 +246,23 @@ fn transform_lno_efficiently<T: Clone, const K:usize>(
 ) -> PartialSLPVar<T,K> {
     use PartialSLPVar::*;
     let eijlist = EijList( eijm2l::<K>(&transform) );
-    // // if let Some(trie) = tries.get(&lno) && let Some(clno) = trie.get(&eijlist) { // have literally computed this line + transform before!!
-    // //     LICP(*clno)
-    // // } else if let Some(trie) = tries.get(&lno) && let Some(anc) = trie.get_ancestor( &eijlist ) { // have computed this line with subtransform before
-    // //     let mut t_clone = transform.clone();
-    // //     matrix_remove_last_n_transforms( &mut t_clone, anc.key().unwrap().0.len() as u32 );
-    // //     if let Some(l2t_slp) = l2t_slp.as_mut() {
-    // //         insert_l2t(l2t_slp, *anc.value().unwrap(), t_clone.clone());
-    // //     } else {
-    // //         insert_l2t(l2t_input, *anc.value().unwrap(), t_clone.clone());
-    // //     }
+    if let Some(trie) = tries.get(&lno) && let Some(clno) = trie.get(&eijlist) { // have literally computed this line + transform before!!
+        LICP(*clno)
+    } else if let Some(trie) = tries.get(&lno) && let Some(anc) = trie.get_ancestor( &eijlist ) && !anc.key().unwrap().0.len() == 0 { // have computed this line with subtransform before
+        let mut t_clone = transform.clone();
+        matrix_remove_last_n_transforms( &mut t_clone, anc.key().unwrap().0.len() as u32 );
+        if let Some(l2t_slp) = l2t_slp.as_mut() {
+            insert_l2t(l2t_slp, *anc.value().unwrap(), t_clone.clone());
+        } else {
+            insert_l2t(l2t_input, *anc.value().unwrap(), t_clone.clone());
+        }
 
-    // //     LTTCP((*anc.value().unwrap(), t_clone))
-    // } else {
+        LTTCP((*anc.value().unwrap(), t_clone))
+    } else {
         insert_l2t(l2t_input, lno, transform);
 
         if l2t_slp.is_some() { LTT((lno, transform)) } else { LTTCP((lno, transform)) }
-    // }
+    }
 }
 
 /// apply_eij_prod_on_addition computes the transformation of an addition line (=L2+0.5) under a matrix representing sorted list of eij transformations
@@ -555,6 +555,8 @@ where
     p_slp.push(Compound(( C(zero_coeff.clone()), Plus, C(zero_coeff.clone()) ))); // add zero to the beginning (once reversed)
     p_slp.reverse();
 
+    println!("SLP Addition BEFORE: \n{}", stringify_partialslp(&p_slp));
+
     // convert all LTT to LIP, LTTCP to LIP as at this point every line should have a transformation in the p_slp
     for (lno, line) in p_slp.iter_mut().enumerate() {
         // println!("Line {}: {}",lno, stringify_partialslpline(&line));
@@ -603,13 +605,11 @@ where
 
     for (ilno, tms) in input_line_map {
         for (tm, olno) in tms {
-            if !tm.iter().all(|i| *i==0) {
-                insert_tm(tries, *ilno, &tm, *olno);
-            }
+            insert_tm(tries, *ilno, &tm, *olno);
         }
     }
 
-    println!("SLP Addition: \n{}", stringify_partialslp(&p_slp));
+    println!("SLP Addition AFTER: \n{}", stringify_partialslp(&p_slp));
 
     // convert PartialSLP to SLP, should be case that all variables are LIP, LICP or C
     use SLPLine::Compound as SLPCompound;
@@ -822,7 +822,7 @@ mod tests {
 =L0*L1
 =L2*L3";
         let slp = parsing::slp_parser_rational(slp_str).expect("Should parse SLP");
-        let bases_sorted = HashMap::from([(vec![(0,1),(1,0)],2), (vec![(0,0),(0,0)],1)]);
+        let bases_sorted = HashMap::from([(vec![(0,0),(0,0)],1), (vec![(0,1),(1,0)],1)]);
 
         println!("Transform {bases_sorted:?}");
         let i64_to_c = |i| Rational64::new(i, 1);
