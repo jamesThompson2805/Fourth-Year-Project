@@ -9,8 +9,10 @@ use radix_trie::Trie;
 use radix_trie::TrieCommon;
 use std::collections::HashMap; 
 use std::collections::HashSet;
+use std::i64;
 use radix_trie::TrieKey;
 use std::fmt::Display;
+use num::integer::binomial;
 
 /// LinesToTransform holds dict of lines in (original / currently computing) SLP and which transforms need to be applied to them
 type LinesToTransform<const K: usize> = HashMap<usize, HashSet<[u32;K]>>;
@@ -244,26 +246,25 @@ fn transform_lno_efficiently<T: Clone, const K:usize>(
 ) -> PartialSLPVar<T,K> {
     use PartialSLPVar::*;
     let eijlist = EijList( eijm2l::<K>(&transform) );
-    if let Some(trie) = tries.get(&lno) && let Some(clno) = trie.get(&eijlist) { // have literally computed this line + transform before!!
-        LICP(*clno)
-    } else if let Some(trie) = tries.get(&lno) && let Some(anc) = trie.get_ancestor( &eijlist ) { // have computed this line with subtransform before
-        let mut t_clone = transform.clone();
-        matrix_remove_last_n_transforms( &mut t_clone, anc.key().unwrap().0.len() as u32 );
-        if let Some(l2t_slp) = l2t_slp.as_mut() {
-            insert_l2t(l2t_slp, *anc.value().unwrap(), t_clone.clone());
-        } else {
-            insert_l2t(l2t_input, *anc.value().unwrap(), t_clone.clone());
-        }
+    // // if let Some(trie) = tries.get(&lno) && let Some(clno) = trie.get(&eijlist) { // have literally computed this line + transform before!!
+    // //     LICP(*clno)
+    // // } else if let Some(trie) = tries.get(&lno) && let Some(anc) = trie.get_ancestor( &eijlist ) { // have computed this line with subtransform before
+    // //     let mut t_clone = transform.clone();
+    // //     matrix_remove_last_n_transforms( &mut t_clone, anc.key().unwrap().0.len() as u32 );
+    // //     if let Some(l2t_slp) = l2t_slp.as_mut() {
+    // //         insert_l2t(l2t_slp, *anc.value().unwrap(), t_clone.clone());
+    // //     } else {
+    // //         insert_l2t(l2t_input, *anc.value().unwrap(), t_clone.clone());
+    // //     }
 
-        LTTCP((*anc.value().unwrap(), t_clone))
-    } else {
+    // //     LTTCP((*anc.value().unwrap(), t_clone))
+    // } else {
         insert_l2t(l2t_input, lno, transform);
 
         if l2t_slp.is_some() { LTT((lno, transform)) } else { LTTCP((lno, transform)) }
-    }
+    // }
 }
 
-// TODO : Write this logic on paper, ensures works
 /// apply_eij_prod_on_addition computes the transformation of an addition line (=L2+0.5) under a matrix representing sorted list of eij transformations
 /// This involves updating the partial structures used to build the final slp: p_slp and line_map.
 /// 
@@ -334,7 +335,7 @@ fn get_all_sub_transforms<const K:usize>(m: [u32;K]) -> Vec<[u32;K]> {
 /// l2t_slp is a dictionary of other lines in the input program that also need to be included into the partial slp with their correspnding transform.
 /// line_map is a dictionary mapping original line numbers to their current index in the partial slp structure.
 /// tries is a map of input line numbers to a trie of transforms and their output line in the current slp.
-fn apply_eij_prod_on_mult<T: Clone, const K: usize>(
+fn apply_eij_prod_on_mult<T: Clone, F: Fn(u64)->T+Copy, const K: usize>(
     v1: &SLPVar<T>,
     v2: &SLPVar<T>,
     transform: &[u32;K],
@@ -344,6 +345,7 @@ fn apply_eij_prod_on_mult<T: Clone, const K: usize>(
     l2t_slp: &mut Option<&mut LinesToTransform<K>>,
     line_map: &mut LineMap<K>,
     tries: &HashMap<usize, Trie<EijList, usize>>,
+    u64_to_c: F
 ) {
     use Operation::*;
     use PartialSLPLine::*;
@@ -362,8 +364,10 @@ fn apply_eij_prod_on_mult<T: Clone, const K: usize>(
                 let n1_var = transform_lno_efficiently(l2t_input, l2t_slp, *n1, subvec, tries);
                 let n2_var = transform_lno_efficiently(l2t_input, l2t_slp, *n2, subvec_minus, tries);
                 if i != all_subvecs_len-1 { // if not the final iteration
-                    p_slp.push(Compound(( LIP(p_slp.len()+1), Plus, LIP(p_slp.len()+2) )));
+                    p_slp.push(Compound(( LIP(p_slp.len()+1), Plus, LIP(p_slp.len()+3) )));
                 }
+                let bin_coeff = (0..K).map(|i| binomial(transform[i], subvec[i]) ).map(|i| i as u64).product();
+                p_slp.push(Compound(( PC(u64_to_c(bin_coeff)), Mult, LIP(p_slp.len()+1) )));
                 p_slp.push(Compound(( n1_var, Mult, n2_var )));
 
             }
@@ -413,7 +417,7 @@ where T: Clone + Display, F: Fn(u64)->T + Copy,
     match line {
         Input(m) => apply_eij_prod_on_input(m, lno, &eijm2l(transform), p_slp, line_map, u64_to_c),
         Compound((v1,Plus,v2)) => apply_eij_prod_on_addition(v1, v2, transform, lno, p_slp, l2t_input, l2t_slp, line_map, tries),
-        Compound((v1, Mult, v2)) => apply_eij_prod_on_mult(v1, v2, transform, lno, p_slp, l2t_input, l2t_slp, line_map, tries),
+        Compound((v1, Mult, v2)) => apply_eij_prod_on_mult(v1, v2, transform, lno, p_slp, l2t_input, l2t_slp, line_map, tries, u64_to_c),
     }
 }
 
@@ -552,7 +556,8 @@ where
     p_slp.reverse();
 
     // convert all LTT to LIP, LTTCP to LIP as at this point every line should have a transformation in the p_slp
-    for line in p_slp.iter_mut() {
+    for (lno, line) in p_slp.iter_mut().enumerate() {
+        // println!("Line {}: {}",lno, stringify_partialslpline(&line));
         match line {
             Compound((v1, _, v2)) => {
                 match v1 {
@@ -568,6 +573,7 @@ where
             }
             Input(_) => (),
         }
+        // println!("  to {}", stringify_partialslpline(&line));
     }
 
     // all LIP in the p_slp need to be reversed to point back to where they should
@@ -597,9 +603,13 @@ where
 
     for (ilno, tms) in input_line_map {
         for (tm, olno) in tms {
-            insert_tm(tries, *ilno, &tm, *olno);
+            if !tm.iter().all(|i| *i==0) {
+                insert_tm(tries, *ilno, &tm, *olno);
+            }
         }
     }
+
+    println!("SLP Addition: \n{}", stringify_partialslp(&p_slp));
 
     // convert PartialSLP to SLP, should be case that all variables are LIP, LICP or C
     use SLPLine::Compound as SLPCompound;
@@ -631,7 +641,6 @@ where
     Ok(curr_slp)
 }
 
-// TODO: TEST THE APPLY_EIJ_PROD_ON_... FUNCTIONS!!
 // TODO:
 // - actually use the lines_to_transform
 // - actually use the tries hashmap to use cached results
@@ -643,11 +652,11 @@ where
 pub fn apply_eij_poly_on_program<T, F, const K: usize>(
     slp: &SLP<T>,
     eijs: &HashMap<Vec<(usize, usize)>, i32>,
-    i32_to_c: F,
+    i64_to_c: F,
 ) -> Result<SLP<T>, String>
 where
     T: Clone + Display,
-    F: Fn(i32) -> T + Copy,
+    F: Fn(i64) -> T + Copy,
 {
     use SLPLine::*;
     use SLPVar::*;
@@ -657,50 +666,30 @@ where
     let mut tries: HashMap<usize, Trie<EijList, usize>> = HashMap::new();
     let mut slp_res:SLP<T> = vec![];
 
-    'outer: for (prod,coeff) in eijs.iter().sorted_by(|(prod,coeff)| -prod.len()) { // go through each term in order of largest product to smallest
-        let mut p_slp: PartialSLP<T,K> = vec![];
-        let eijlist = EijList(prod.clone());
+    let u64_to_c = |i| i64_to_c(i as i64);
+    let i32_to_c = |i| i64_to_c(i as i64);
 
-        let mut line_map: LineMap<K> = HashMap::new();
-        let mut lines_to_transform: LinesToTransform<K> = HashMap::new();
-        lines_to_transform.insert(slp.len()-1, eijl2m::<K>(&prod));
-
-        // Using the trie:
-        //  FOR THE VERY FIRST (LAST?) OF PROJECTING WITH THIS EIJLIST
-        //    If we have already computed the entire thing, skip to adding that line number to the overall slp
-        //  FOR EVERY OTHER LINE
-        //    If the line is a Compound with references:
-        //     - Find nearest ancestor for reference in trie
-        //     - If ancestor key is eijlist, use the direct slp reference
-        //     - If ancestor is suffix and is all but one (ie only on eij not in suffix) then can use basis_element code to compute from slp_res
-        //     - If ancestor is suffix, can technically use from that line in slp_res (maybe extension) to skip further computation
-        //     - If no ancestor then just have to compute it from scratch 
-        for (lno, line) in slp.iter().enumerate().rev() {
-            if !lines_to_transform.contains_key(&lno) { continue; }
-
-            if lno == slp.len()-1 && let Some(trie) = tries.get(&lno) && let Some(&trans_lno) = trie.get(&eijlist) { // First line of computation, found reference in slp_res already
-                slp_res.push( Compound(( C(i32_to_c(*coeff as i32)), Mult, L(trans_lno)       )) );
-                slp_res.push( Compound(( L(slp_res.len()-2),         Plus, L(slp_res.len()-1) )) );
-                continue 'outer; // already done for this product, move to next
-            }
-
-            if prod.is_empty() {
-                
-            }
-
-
-            match line {
-                Input(m) => apply_eij_prod_on_input(m, lno, prod, &mut p_slp, &mut line_map, i32_to_c), // TODO : ignoring the capability for trie
-                Compound((C(_), Plus, C(_)) => (), // TODO : Continue from here
-            }
+    for (prod,coeff) in eijs.iter().sorted_by(|p1,p2| p2.0.len().cmp(&p1.0.len())) { // go through each term in order of largest product to smallest
+        if *coeff == 0 {
+            continue;
         }
+        let (p_slp, _l2t_input, _l2t_slp,mut iline_map,mut curr_line_map) 
+            = apply_eij_prod_on_slp(&slp, &slp_res, &eijl2m::<K>(prod), &tries, u64_to_c)?;
 
+        // println!("iline_map: \n{iline_map:?}");
+        // println!("currline_map: \n{curr_line_map:?}");
 
-
+        // for (k,v) in &tries {
+        //     println!("Trie {k} is \n{v:?}");
+        // }
+        // println!("\n");
+        println!("Transform {:?}",eijl2m::<K>(prod));
+        
+        slp_res = add_scaled_p_slp_onto_curr_slp(slp_res, p_slp, i32_to_c(*coeff), &mut iline_map, &mut curr_line_map, &mut tries, i64_to_c(0)).unwrap();
+        
     }
 
-
-    unimplemented!()
+    Ok(slp_res)
 }
 
 #[cfg(test)]
@@ -709,6 +698,7 @@ mod tests {
     use crate::evaluation;
     use crate::evaluation::stepwise_slp_to_poly;
     use crate::parsing;
+    use crate::projections;
     use num_rational::BigRational;
     use num_rational::Rational64;
     use SLPLine::*;
@@ -781,8 +771,9 @@ mod tests {
         let mut line_map: LineMap<9> = HashMap::new();
         let mut trie_map: TrieMap = HashMap::new();
         insert_tm::<9>(&mut trie_map, 101, &[0,0,0,2,0,0,0,0,0], 20);
+        let u64_to_c = |i| i as u64;
 
-        apply_eij_prod_on_mult::<u64,9>(&var1, &var2, &transform, 10, &mut p_slp, &mut l2t_input, &mut Some(&mut l2t_slp), &mut line_map, &trie_map);
+        apply_eij_prod_on_mult::<u64,_,9>(&var1, &var2, &transform, 10, &mut p_slp, &mut l2t_input, &mut Some(&mut l2t_slp), &mut line_map, &trie_map, u64_to_c);
 
         println!("p_slp: {}", stringify_partialslp(&p_slp));
         println!("l2t_input: {l2t_input:?}");
@@ -815,4 +806,31 @@ mod tests {
         let slp_res = add_scaled_p_slp_onto_curr_slp(curr_slp, p_slp, Rational64::ONE, &mut iline_map, &mut curr_line_map, &mut trie_map, Rational64::ZERO).unwrap();
         println!("slp: \n{}",stepwise_slp_to_poly(&slp_res, Rational64::ONE));
     } // TODO : Clearly shows need for slp reduction inbetween summations
+
+    #[test]
+    fn get_all_sub_transforms_test() {
+        let transform = [2,0,0,0,0,0,0,0,0];
+        println!("subtransforms: {:?}", get_all_sub_transforms(transform));
+    }
+
+    // TODO : Test apply_eij_poly_on_program<T, F, const K: usize> with random poly's and casimirs!
+    #[test]
+    fn test_apply_poly_on_program() {
+        let slp_str = "=C<0,0,2>
+=C<0,2,0>
+=C<2,0,0>
+=L0*L1
+=L2*L3";
+        let slp = parsing::slp_parser_rational(slp_str).expect("Should parse SLP");
+        let bases_sorted = HashMap::from([(vec![(0,1),(1,0)],2), (vec![(0,0),(0,0)],1)]);
+
+        println!("Transform {bases_sorted:?}");
+        let i64_to_c = |i| Rational64::new(i, 1);
+        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &bases_sorted, i64_to_c).unwrap();
+
+        println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE));
+
+
+    }
+
 }

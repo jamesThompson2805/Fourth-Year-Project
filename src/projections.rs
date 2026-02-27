@@ -329,10 +329,17 @@ fn casimir_prod_to_sorted_basis_matrices(prod: &[usize], k: usize) -> HashMap<LA
     }).flatten().into_grouping_map().sum()
 }
 
-/// casimir_eq_to_sorted_basis_matrices
-/// TODO: explain how this works, still got no clue how to test it
-fn casimir_eq_to_sorted_basis_matrices(sum: &Vec<Vec<usize>>, k: usize) -> HashMap<LAProd<(usize, usize)>, i32> {
-    sum.into_iter().map(|v| casimir_prod_to_sorted_basis_matrices(v, k)).flatten().into_grouping_map().sum()
+/// casimir_eq_to_sorted_basis_matrices takes a sum of scaled products of casimir elements and computes their polynomial of sorted basis elements
+fn casimir_eq_to_sorted_basis_matrices(sum: &Vec<(Vec<usize>,i32)>, k: usize) -> HashMap<LAProd<(usize, usize)>, i32> {
+    sum.into_iter().map(|(v,c)| 
+        casimir_prod_to_sorted_basis_matrices(v, k).into_iter().map(move |p| (p.0,p.1 * c))
+    ).flatten().into_grouping_map().sum()
+}
+
+fn eval_proj_pairs_to_sorted_basis(v: &[(usize, i32)], k: usize) -> HashMap<LAProd<(usize,usize)>, i32> {
+    let casimir_poly = eval_proj_pairs::<i32>(v, 1);
+    println!("casimir poly {casimir_poly:?}");
+    casimir_eq_to_sorted_basis_matrices(&casimir_poly.into_iter().collect(), k)
 }
 
 use std::cmp::Ordering;
@@ -474,6 +481,7 @@ mod tests {
     use crate::evaluation::{are_rational_slp_similar, stepwise_slp_to_poly};
     use crate::straight_line_program::scale_slp;
     use crate::parsing::slp_parser_rational;
+    use crate::transformations::*;
 
     #[test]
     fn find_casimir_2_2() {
@@ -605,7 +613,27 @@ mod tests {
 
     #[test]
     fn test_casimir_prod_sorting() {
-        let casimirs = vec![vec![1,2,3],vec![2,1]];
+        let casimirs = vec![(vec![1,2,3],1), (vec![2,1],1)];
         println!("{:?}", casimir_eq_to_sorted_basis_matrices(&casimirs, 3).len());
+    }
+
+    #[test]
+    fn test_apply_casimir_on_program() {
+        let slp_str = "=C<2,0,0>
+=C<0,2,0>
+=C<0,0,2>
+=L0*L1
+=L3*L2";
+        let slp = slp_parser_rational(slp_str).expect("Should parse SLP");
+        let i64_to_c = |i| Rational64::new(i, 1);
+        let casimir_sorted = eval_proj_pairs_to_sorted_basis(&vec![(2,-12),(2,-28)], 3);
+
+        println!("Casimir el 2 is {casimir_sorted:?}");
+        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &casimir_sorted, i64_to_c).unwrap();
+
+        // println!("SLP Res: \n{}", stringify_slp(&slp_res));
+        println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE));
+
+
     }
 }
