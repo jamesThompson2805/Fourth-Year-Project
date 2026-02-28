@@ -182,9 +182,10 @@ enum SLPLineReduced<T> {L(SLPLine<T>), V(SLPVar<T>)}
 use std::collections::HashMap;
 use std::ops::{Add,Mul};
 use std::hash::Hash;
-pub fn reduce_slp<T>(slp: &mut SLP<T>, zero: T) -> HashMap<usize, usize>
+use std::fmt::Debug;
+pub fn reduce_slp<T>(slp: &mut SLP<T>, zero: T, one: T) -> HashMap<usize, usize>
 where
-    T: Default + Add<Output=T> + Mul<Output=T> + Clone + Eq + Hash,
+    T: Add<Output=T> + Mul<Output=T> + Clone + Eq + Hash + Debug,
 {
     let mut similar_lines: HashMap<usize, (usize, SLPLineReduced<T>)> = HashMap::new();
     let mut lines_seen: HashMap<SLPLineReduced<T>, usize> = HashMap::new();
@@ -210,11 +211,12 @@ where
             Compound(( C(c), Mult, VL(n) )) | Compound(( VL(n), Mult, C(c) )) => {
                 if c == &zero { // optimisation: if times zero then map straight to zero reference
                     V(C(c.clone()))
-                } else if c == &T::default() { // optimisation: if times one then only use reference in future
+                } else if c == &one { // optimisation: if times one then only use reference in future
                     let term = similar_lines.get(n).map_or(VL(*n), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
                     V(term)
                 } else {
-                    L( Compound(( C(c.clone()), Mult, VL(*n) )) )
+                    let smallest_ref = similar_lines.get(n).map_or(*n, |p| p.0);
+                    L( Compound(( C(c.clone()), Mult, VL(smallest_ref) )) )
                 }
             },
             Compound(( VL(n1), Plus, VL(n2) )) => {
@@ -237,18 +239,20 @@ where
                     ( C(c1), C(c2) ) => V(C(c1*c2)),
                     ( C(c), VL(n) ) | ( VL(n), C(c) ) =>  
                         if c == zero { V(C(zero.clone())) } // covered case that coefficient is zero
-                        else if c==T::default() { V(VL(n)) } // covered case that coefficient is one
+                        else if c==one { V(VL(n)) } // covered case that coefficient is one
                         else { L(Compound(( C(c), Mult, VL(n) ))) }
                     ,
                     ( VL(n1), VL(n2) ) => L(Compound(( VL(n1.min(n2)), Mult, VL(n1.max(n2)) ))),
                 }
             },
         };
+        // println!("Line {lno} becomes {slpline_reduced:?}");
         if let Some(n) = lines_seen.get(&slpline_reduced) {
             similar_lines.insert( lno, (*n, slpline_reduced) );
         } else {
             similar_lines.insert( lno, (lno, slpline_reduced.clone()));
             lines_seen.insert( slpline_reduced, lno);
+            lines_seen.insert( V(VL(lno)), lno);
         }
     }
 
@@ -265,13 +269,12 @@ where
         index_map[i] = j;
         i+=1;
     }
-
     // update all references in the slp
     for line in slp.iter_mut() {
         match line {
             Compound(( VL(n1), _, VL(n2) )) => {
                 *n1 = index_map[ similar_lines[n1].0 ];
-                *n2 = index_map[ similar_lines[n1].0 ];
+                *n2 = index_map[ similar_lines[n2].0 ];
             },
             Compound(( VL(n), _, _ )) | Compound(( _, _, VL(n) )) => *n = index_map[ similar_lines[n].0 ],
             _ => (),
