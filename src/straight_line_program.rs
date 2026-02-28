@@ -9,19 +9,37 @@ pub type MetaVar = Vec<u32>;
 
 /// SLPVar is a variable in a summation or product expression, it can be either a numeric type or a line reference.
 ///  SLPVar is generic as we don't apply any actual addition or multiplication upon the coefficients
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, Eq)]
 pub enum SLPVar<T> { L(usize), C(T) }
+impl<T> PartialEq for SLPVar<T> where T: PartialEq {
+    fn eq(&self, other: &Self) -> bool {
+        match (self,other) {
+            (SLPVar::L(n),SLPVar::L(m)) => n==m,
+            (SLPVar::C(p),SLPVar::C(q)) => p==q,
+            _ => false,
+        }
+    }
+}
 
 
 /// Operation is either addition or multiplication, used in compound expressions (eg. L1*L3)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operation { Plus, Mult, }
 
 /// SLPLine is either a metavariable or an addition or multiplication expression (tuple of three elements)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq)]
 pub enum SLPLine<T> {
     Input(MetaVar),
     Compound((SLPVar<T>, Operation, SLPVar<T>)),
+}
+impl<T> PartialEq for SLPLine<T> where T: PartialEq {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SLPLine::Input(m1), SLPLine::Input(m2)) => m1==m2,
+            (SLPLine::Compound(c1), SLPLine::Compound(c2)) => c1==c2,
+            _ => false,
+        }
+    }
 }
 
 /// SLP is a vector of lines
@@ -158,59 +176,117 @@ pub fn are_all_line_refs_valid<T>(slp: &SLP<T>) -> Option<usize> {
     }).map(|(i,_)| i)
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+enum SLPLineReduced<T> {L(SLPLine<T>), V(SLPVar<T>)}
 
-/* 
-use std::collections::BTreeMap;
-type MetaMonomial = BTreeMap<MetaVar, u64>;
-type MetaPolynomial = BTreeMap<MetaMonomial, Complex64>;
+use std::collections::HashMap;
+use std::ops::{Add,Mul};
+use std::hash::Hash;
+pub fn reduce_slp<T>(slp: &mut SLP<T>, zero: T) -> HashMap<usize, usize>
+where
+    T: Default + Add<Output=T> + Mul<Output=T> + Clone + Eq + Hash,
+{
+    let mut similar_lines: HashMap<usize, (usize, SLPLineReduced<T>)> = HashMap::new();
+    let mut lines_seen: HashMap<SLPLineReduced<T>, usize> = HashMap::new();
 
-fn create_coeff(c: &Complex64) -> MetaPolynomial {
-    BTreeMap::from([( BTreeMap::from([(Vec::new(),1)]), *c )])
-}
+    use SLPLine::*;
+    use SLPVar::C;
+    use SLPVar::L as VL;
+    use SLPLineReduced::*;
+    use Operation::*;
+    for (lno, line) in slp.iter().enumerate() {
+        let slpline_reduced = match line {
+            Input(v) => L(Input(v.clone())),
+            Compound(( C(c1), Plus, C(c2) )) => V(C(c1.clone() + c2.clone())),
+            Compound(( C(c1), Mult, C(c2) )) => V(C(c1.clone() * c2.clone())),
+            Compound(( C(c), Plus, VL(n) )) | Compound(( VL(n), Plus, C(c) )) => {
+                if c == &zero { // optimisation: if plus zero then use only the reference in future
+                    let term = similar_lines.get(n).map_or(VL(*n), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
+                    V(term)
+                } else {
+                    L( Compound(( C(c.clone()), Plus, VL(*n) )) )
+                }
+            },
+            Compound(( C(c), Mult, VL(n) )) | Compound(( VL(n), Mult, C(c) )) => {
+                if c == &zero { // optimisation: if times zero then map straight to zero reference
+                    V(C(c.clone()))
+                } else if c == &T::default() { // optimisation: if times one then only use reference in future
+                    let term = similar_lines.get(n).map_or(VL(*n), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
+                    V(term)
+                } else {
+                    L( Compound(( C(c.clone()), Mult, VL(*n) )) )
+                }
+            },
+            Compound(( VL(n1), Plus, VL(n2) )) => {
+                let term1 = similar_lines.get(n1).map_or(VL(*n1), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
+                let term2 = similar_lines.get(n2).map_or(VL(*n2), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
+                match (term1, term2) {
+                    ( C(c1), C(c2) ) => V(C(c1+c2)),
+                    ( C(c), VL(n) ) | ( VL(n), C(c) ) =>  
+                        if c == zero { V(VL(n)) } // covered case that coefficient is zero again
+                        else { L(Compound(( C(c), Plus, VL(n) ))) }
+                    ,
+                    ( VL(n1), VL(n2) ) => L(Compound(( VL(n1.min(n2)), Plus, VL(n1.max(n2)) ))),
+                }
 
-fn evaluate_plus( s1: &SLPVar, s2: &SLPVar, so_far: &Vec<Option<MetaPolynomial>>) -> Option<MetaPolynomial> {
-    use SLPVar::*;
-    let mp_1 = match s1 {
-        L(n) => so_far[*n].clone(),
-        F(c) => create_coeff(c),
-    };
-    let mut mp_2 = match s2 {
-        L(n) => so_far[*n].clone(),
-        F(c) => create_coeff(c),
-    };
-    let mut mp: MetaPolynomial = BTreeMap::new();
-    for (k,v) in mp_1 {
-        if mp_2.contains_key(&k) {
-            let v_new = v + mp_2[&k];
-            mp_2.remove(&k);
-            mp.insert(k, v_new);
+            },
+            Compound(( VL(n1), Mult, VL(n2) )) => {
+                let term1 = similar_lines.get(n1).map_or(VL(*n1), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
+                let term2 = similar_lines.get(n2).map_or(VL(*n2), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
+                match (term1, term2) {
+                    ( C(c1), C(c2) ) => V(C(c1*c2)),
+                    ( C(c), VL(n) ) | ( VL(n), C(c) ) =>  
+                        if c == zero { V(C(zero.clone())) } // covered case that coefficient is zero
+                        else if c==T::default() { V(VL(n)) } // covered case that coefficient is one
+                        else { L(Compound(( C(c), Mult, VL(n) ))) }
+                    ,
+                    ( VL(n1), VL(n2) ) => L(Compound(( VL(n1.min(n2)), Mult, VL(n1.max(n2)) ))),
+                }
+            },
+        };
+        if let Some(n) = lines_seen.get(&slpline_reduced) {
+            similar_lines.insert( lno, (*n, slpline_reduced) );
         } else {
-            mp.insert(k,v);
+            similar_lines.insert( lno, (lno, slpline_reduced.clone()));
+            lines_seen.insert( slpline_reduced, lno);
         }
     }
-    for (k,v) in mp_2 {
-        mp.insert(k,v);
+
+    // find those lines to remove (those that are similar to an earlier line)
+    let lines_to_remove = similar_lines.iter().filter(|(k,v)| **k!=v.0).map(|(k,_)| k).collect::<HashSet<_>>();
+    // the index_map maps line references to their position after deleting all lines in lines_to_remove
+    let mut index_map = vec![0; slp.len()];
+    let mut i=0;
+    for j in 0..slp.len() {
+        while lines_to_remove.contains(&i) {
+            i+=1;
+        }
+        if i>=slp.len() { break; }
+        index_map[i] = j;
+        i+=1;
     }
-    unimplemented!()
-}
 
-pub fn evaluate_slp(slp: &SLP) -> String {
-    use SLPLine::*;
-    use Operation::*;
-    let mut mp_v: Vec<Option<MetaPolynomial>> = Vec::new();
-    for line in slp {
-        let mp = match line {
-                Input(m) => {
-                    let mm:MetaMonomial = BTreeMap::from([(m.clone(),1)]);
-                    Some(BTreeMap::from( [(mm, Complex64::ONE)] ))
-                },
-                Compound((s1,Plus, s2)) => ,
-                Compound((s1,Mult, s2)) => ,
+    // update all references in the slp
+    for line in slp.iter_mut() {
+        match line {
+            Compound(( VL(n1), _, VL(n2) )) => {
+                *n1 = index_map[ similar_lines[n1].0 ];
+                *n2 = index_map[ similar_lines[n1].0 ];
+            },
+            Compound(( VL(n), _, _ )) | Compound(( _, _, VL(n) )) => *n = index_map[ similar_lines[n].0 ],
+            _ => (),
+        }
+    }
 
-        };
-        mp_v.push(mp);
+    let mut current_idx = 0;
+
+    slp.retain_mut(|_line| {
+        let should_keep = !lines_to_remove.contains(&current_idx);
         
-    }
-    unimplemented!()
+        current_idx += 1;
+        should_keep
+    });
+
+
+    similar_lines.into_iter().map(|(k,v)| (k, index_map[v.0])).collect()
 }
-*/

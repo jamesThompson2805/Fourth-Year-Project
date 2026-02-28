@@ -555,7 +555,6 @@ where
     p_slp.push(Compound(( C(zero_coeff.clone()), Plus, C(zero_coeff.clone()) ))); // add zero to the beginning (once reversed)
     p_slp.reverse();
 
-    println!("SLP Addition BEFORE: \n{}", stringify_partialslp(&p_slp));
 
     // convert all LTT to LIP, LTTCP to LIP as at this point every line should have a transformation in the p_slp
     for (lno, line) in p_slp.iter_mut().enumerate() {
@@ -609,7 +608,6 @@ where
         }
     }
 
-    println!("SLP Addition AFTER: \n{}", stringify_partialslp(&p_slp));
 
     // convert PartialSLP to SLP, should be case that all variables are LIP, LICP or C
     use SLPLine::Compound as SLPCompound;
@@ -683,7 +681,6 @@ where
         //     println!("Trie {k} is \n{v:?}");
         // }
         // println!("\n");
-        println!("Transform {:?}",eijl2m::<K>(prod));
         
         slp_res = add_scaled_p_slp_onto_curr_slp(slp_res, p_slp, i32_to_c(*coeff), &mut iline_map, &mut curr_line_map, &mut tries, i64_to_c(0)).unwrap();
         
