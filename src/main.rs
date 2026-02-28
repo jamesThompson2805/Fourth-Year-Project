@@ -3,6 +3,7 @@ mod parsing;
 mod transformations;
 mod evaluation;
 mod projections;
+mod pbw_reduce;
 
 /*
 use std::fs;
