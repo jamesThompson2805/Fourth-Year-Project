@@ -201,22 +201,19 @@ where
             Compound(( C(c1), Plus, C(c2) )) => V(C(c1.clone() + c2.clone())),
             Compound(( C(c1), Mult, C(c2) )) => V(C(c1.clone() * c2.clone())),
             Compound(( C(c), Plus, VL(n) )) | Compound(( VL(n), Plus, C(c) )) => {
-                if c == &zero { // optimisation: if plus zero then use only the reference in future
-                    let term = similar_lines.get(n).map_or(VL(*n), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
-                    V(term)
-                } else {
-                    L( Compound(( C(c.clone()), Plus, VL(*n) )) )
+                let term = similar_lines.get(n).map_or(VL(*n), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
+                match term {
+                    VL(n) => if c==&zero {V(term)} else {L( Compound(( C(c.clone()), Plus, VL(n) )) )},
+                    C(c2) => V(C( c2 + c.clone() )),
                 }
             },
             Compound(( C(c), Mult, VL(n) )) | Compound(( VL(n), Mult, C(c) )) => {
-                if c == &zero { // optimisation: if times zero then map straight to zero reference
-                    V(C(c.clone()))
-                } else if c == &one { // optimisation: if times one then only use reference in future
-                    let term = similar_lines.get(n).map_or(VL(*n), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
-                    V(term)
-                } else {
-                    let smallest_ref = similar_lines.get(n).map_or(*n, |p| p.0);
-                    L( Compound(( C(c.clone()), Mult, VL(smallest_ref) )) )
+                let term = similar_lines.get(n).map_or(VL(*n), |p| { if let V(var) = &p.1 {var.clone()} else {VL(p.0)} });
+                match term {
+                    VL(n) => if c==&zero {V(C(c.clone()))} 
+                                else if c==&one {V(term)}
+                                else {L( Compound(( C(c.clone()), Mult, VL(n) )) )},
+                    C(c2) => V(C( c2 * c.clone() )),
                 }
             },
             Compound(( VL(n1), Plus, VL(n2) )) => {
@@ -248,6 +245,7 @@ where
         };
         // println!("Line {lno} becomes {slpline_reduced:?}");
         if let Some(n) = lines_seen.get(&slpline_reduced) {
+            // println!("  Line {lno} reduces to {n}");
             similar_lines.insert( lno, (*n, slpline_reduced) );
         } else {
             similar_lines.insert( lno, (lno, slpline_reduced.clone()));

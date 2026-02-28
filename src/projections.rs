@@ -646,21 +646,13 @@ mod tests {
 =L3*L2";
         let slp = slp_parser_rational(slp_str).expect("Should parse SLP");
         let i64_to_c = |i| Rational64::new(i, 1);
-        let casimir_sorted = eval_proj_pairs_to_sorted_basis(&vec![(2,-1),(2,-12),(2,-28)], 3);
+        let casimir_sorted = eval_proj_pairs_to_sorted_basis(&vec![(2,-12),(2,-12),(2,-28)], 3);
 
-        println!("Casimir el 2 is {casimir_sorted:?}");
-        let mut slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &casimir_sorted, i64_to_c).unwrap();
+        println!("Casimir el is {casimir_sorted:?}");
+        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &casimir_sorted, i64_to_c).unwrap();
 
         // println!("SLP Res: \n{}", stringify_slp(&slp_res));
         println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE).split("\n").last().unwrap());
-
-
-        let _slp_res_size = slp_res.len();
-        let _line_map = straight_line_program::reduce_slp(&mut slp_res, Rational64::ZERO, Rational64::ONE);
-
         // println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE));
-        println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE).split("\n").last().unwrap());
-
-
     }
 }

@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::i64;
 use radix_trie::TrieKey;
-use std::fmt::Display;
+use std::fmt::{Display, Debug};
+use std::ops::{Add, Mul};
+use std::hash::Hash;
 use num::integer::binomial;
 
 /// LinesToTransform holds dict of lines in (original / currently computing) SLP and which transforms need to be applied to them
@@ -557,7 +559,7 @@ where
 
 
     // convert all LTT to LIP, LTTCP to LIP as at this point every line should have a transformation in the p_slp
-    for (lno, line) in p_slp.iter_mut().enumerate() {
+    for (_lno, line) in p_slp.iter_mut().enumerate() {
         // println!("Line {}: {}",lno, stringify_partialslpline(&line));
         match line {
             Compound((v1, _, v2)) => {
@@ -653,7 +655,7 @@ pub fn apply_eij_poly_on_program<T, F, const K: usize>(
     i64_to_c: F,
 ) -> Result<SLP<T>, String>
 where
-    T: Clone + Display,
+    T: Add<Output=T> + Mul<Output=T> + Clone + Eq + Hash + Display + Debug,
     F: Fn(i64) -> T + Copy,
 {
     use SLPLine::*;
@@ -683,8 +685,17 @@ where
         // println!("\n");
         
         slp_res = add_scaled_p_slp_onto_curr_slp(slp_res, p_slp, i32_to_c(*coeff), &mut iline_map, &mut curr_line_map, &mut tries, i64_to_c(0)).unwrap();
-        
+
+        let line_map = reduce_slp(&mut slp_res, i64_to_c(0), i64_to_c(1));
+        for trie in tries.values_mut() {
+            let keys: Vec<_> = trie.keys().cloned().collect::<Vec<_>>();
+            for key in keys{
+                let val = trie.get_mut(&key).unwrap();
+                *val = line_map[ val ];
+            }
+        }
     }
+
 
     Ok(slp_res)
 }
@@ -823,8 +834,10 @@ mod tests {
 
         println!("Transform {bases_sorted:?}");
         let i64_to_c = |i| Rational64::new(i, 1);
-        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &bases_sorted, i64_to_c).unwrap();
+        let mut slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &bases_sorted, i64_to_c).unwrap();
 
+        println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE));
+        reduce_slp(&mut slp_res, i64_to_c(0), i64_to_c(1));
         println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE));
 
 
