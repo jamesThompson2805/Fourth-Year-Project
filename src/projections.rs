@@ -347,7 +347,7 @@ pub fn apply_lambda_projection_to_slp<T, F, const K: usize>(
     i64_to_c: F,
 ) -> Result<SLP<T>, String>
 where
-    T: Add<Output=T> + Mul<Output=T> + Clone + Eq + Hash + Display + Debug + Default,
+    T: Add<Output=T> + Mul<Output=T> + Div<Output=T> + Clone + Eq + Hash + Display + Debug + Default,
     F: Fn(i64) -> T + Copy,
 {
     
@@ -357,13 +357,16 @@ where
     }
 
     let distinguishing_partitions: Vec<_> = find_distinguishing_parts_and_indices(&lambda).into_iter().map(|(p,c)| (p, c as u32)).collect();
-    let numerators: Vec<(usize, i32)> = distinguishing_partitions.iter().map(|(p, cas_num)| (*cas_num as usize, casimir_eigenval(*cas_num, p, k))).collect();
+    let numerators: Vec<(usize, i32)> = distinguishing_partitions.iter().map(|(p, cas_num)| (*cas_num as usize, -1*casimir_eigenval(*cas_num, p, k))).collect();
     let denominator: i64 = distinguishing_partitions.iter().map(|(p, cas_num)| casimir_eigenval(*cas_num, &lambda, k) as i64 - casimir_eigenval(*cas_num, p, k) as i64 ).product();
+
+    println!("numerators: {numerators:?}");
+    println!("denominator: {denominator}");
 
     let numerator_basis_transforms = eval_proj_pairs_to_sorted_basis(&numerators[..], k);
     let mut slp_res = transformations::apply_eij_poly_on_program::<T,F,K>(slp, &numerator_basis_transforms, i64_to_c)?;
     
-    let scalar = i64_to_c( 1 / denominator );
+    let scalar = i64_to_c(1) / i64_to_c( denominator );
     scale_slp(&mut slp_res, scalar);
 
     Ok(slp_res)
