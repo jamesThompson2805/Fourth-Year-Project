@@ -277,6 +277,15 @@ fn eval_proj_pairs_to_sorted_basis(v: &[(usize, i32)], k: usize) -> HashMap<LAPr
     casimir_eq_to_sorted_basis_matrices(&casimir_poly.into_iter().collect(), k)
 }
 
+fn lambda_proj_with_specific_parts(lambda: &Vec<u32>, partitions: &Vec<Vec<u32>>, k: usize) -> Option<HashMap<LAProd<(usize,usize)>, i32>> {
+    let casimirs_and_subtract:Vec<(usize, i32)> = partitions.iter().map(|p| {
+        let c_i = find_distinguishing_casimir_index(p, lambda)?;
+        Some( (c_i, -1*casimir_eigenval(c_i as u32, p, k)) )
+    }).flatten().collect(); // adding flatten makes it so any without distinguishing are removed
+    let casimirs_and_subtract = dbg!(casimirs_and_subtract);
+    Some(eval_proj_pairs_to_sorted_basis(&casimirs_and_subtract, k))
+}
+
 
 /// apply_candidate_partitions_to_slp_slow applies all candidate partitions to a slp in the exponentially slow way
 /// the projection is defined as P_{\lambda} = \Pi_{\mu \in \Lambda, \mu \neq \lambda} {
@@ -338,7 +347,7 @@ pub fn apply_lambda_projection_to_slp<T, F, const K: usize>(
     i64_to_c: F,
 ) -> Result<SLP<T>, String>
 where
-    T: Add<Output=T> + Mul<Output=T> + Clone + Eq + Hash + Display + Debug,
+    T: Add<Output=T> + Mul<Output=T> + Clone + Eq + Hash + Display + Debug + Default,
     F: Fn(i64) -> T + Copy,
 {
     
@@ -555,6 +564,32 @@ mod tests {
         let i64_to_c = |i| Rational64::new(i, 1);
 
         let slp_res = apply_lambda_projection_to_slp::<_,_,9>(&slp, &vec![6,0,0], i64_to_c).unwrap();
+        println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE).split("\n").last().unwrap());
+    }
+
+    #[test]
+    fn test_example_5_4_partially() {
+        let slp_str = "=C<2,0,0>
+=C<0,2,0>
+=C<0,0,2>
+=L0*L1
+=L3*L2";
+        let slp = slp_parser_rational(slp_str).expect("Should parse SLP");
+        let i64_to_c = |i| Rational64::new(i, 1);
+
+        let partitions = vec![
+            vec![5,1,0],
+            vec![2,2,2],
+            vec![4,2,0],
+            // vec![3,3,0],
+            // vec![3,2,1],
+            // vec![4,1,1],
+        ];
+        let basis_poly = lambda_proj_with_specific_parts(&vec![6,0,0], &partitions, 3).unwrap();
+        
+        println!("Casimir of [6,0,0] with C2 is {}", casimir_eigenval(2, &vec![6,0,0], 3));
+
+        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &basis_poly, i64_to_c).unwrap();
         println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE).split("\n").last().unwrap());
     }
 }

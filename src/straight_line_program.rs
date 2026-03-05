@@ -183,7 +183,7 @@ use std::collections::HashMap;
 use std::ops::{Add,Mul};
 use std::hash::Hash;
 use std::fmt::Debug;
-pub fn reduce_slp<T>(slp: &mut SLP<T>, zero: T, one: T) -> HashMap<usize, usize>
+pub fn reduce_slp<T>(slp: &mut SLP<T>, zero: T, one: T) -> Vec<usize>
 where
     T: Add<Output=T> + Mul<Output=T> + Clone + Eq + Hash + Debug,
 {
@@ -289,5 +289,10 @@ where
     });
 
 
-    similar_lines.into_iter().map(|(k,v)| (k, index_map[v.0])).collect()
+    
+    for (k,v) in similar_lines.iter() {
+        index_map[*k] = index_map[v.0];
+    }
+    println!("  index map {index_map:?}");
+    index_map
 }
