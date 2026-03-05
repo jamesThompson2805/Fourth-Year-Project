@@ -255,7 +255,9 @@ where
     }
 
     // find those lines to remove (those that are similar to an earlier line)
-    let lines_to_remove = similar_lines.iter().filter(|(k,v)| **k!=v.0).map(|(k,_)| k).collect::<HashSet<_>>();
+    let mut lines_to_remove = similar_lines.iter().filter(|(k,v)| **k!=v.0).map(|(k,_)| k).collect::<HashSet<_>>();
+    lines_to_remove.remove( &(slp.len()-1) ); // should ensure we keep the final line
+
     // the index_map maps line references to their position after deleting all lines in lines_to_remove
     let mut index_map = vec![0; slp.len()];
     let mut i=0;
@@ -267,6 +269,7 @@ where
         index_map[i] = j;
         i+=1;
     }
+    
     // update all references in the slp
     for line in slp.iter_mut() {
         match line {
@@ -293,6 +296,6 @@ where
     for (k,v) in similar_lines.iter() {
         index_map[*k] = index_map[v.0];
     }
-    println!("  index map {index_map:?}");
+    // println!("  index map {index_map:?}");
     index_map
 }

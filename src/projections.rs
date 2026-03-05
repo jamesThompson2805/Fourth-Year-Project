@@ -581,9 +581,9 @@ mod tests {
             vec![5,1,0],
             vec![2,2,2],
             vec![4,2,0],
-            // vec![3,3,0],
-            // vec![3,2,1],
-            // vec![4,1,1],
+            vec![3,3,0],
+            vec![3,2,1],
+            vec![4,1,1],
         ];
         let basis_poly = lambda_proj_with_specific_parts(&vec![6,0,0], &partitions, 3).unwrap();
         

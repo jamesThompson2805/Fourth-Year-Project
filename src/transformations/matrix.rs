@@ -248,23 +248,23 @@ fn transform_lno_efficiently<T: Clone, const K:usize>(
 ) -> PartialSLPVar<T,K> {
     use PartialSLPVar::*;
     let eijlist = EijList( eijm2l::<K>(&transform) );
-    // if let Some(trie) = tries.get(&lno) && let Some(clno) = trie.get(&eijlist) { // have literally computed this line + transform before!!
-    //     LICP(*clno)
-    // } else if let Some(trie) = tries.get(&lno) && let Some(anc) = trie.get_ancestor( &eijlist ) && !anc.key().unwrap().0.len() == 0 { // have computed this line with subtransform before
-    //     let mut t_clone = transform.clone();
-    //     matrix_remove_last_n_transforms( &mut t_clone, anc.key().unwrap().0.len() as u32 );
-    //     if let Some(l2t_slp) = l2t_slp.as_mut() {
-    //         insert_l2t(l2t_slp, *anc.value().unwrap(), t_clone.clone());
-    //     } else {
-    //         insert_l2t(l2t_input, *anc.value().unwrap(), t_clone.clone());
-    //     }
+    if let Some(trie) = tries.get(&lno) && let Some(clno) = trie.get(&eijlist) { // have literally computed this line + transform before!!
+        LICP(*clno)
+    } else if let Some(trie) = tries.get(&lno) && let Some(anc) = trie.get_ancestor( &eijlist ) && !anc.key().unwrap().0.len() == 0 { // have computed this line with subtransform before
+        let mut t_clone = transform.clone();
+        matrix_remove_last_n_transforms( &mut t_clone, anc.key().unwrap().0.len() as u32 );
+        if let Some(l2t_slp) = l2t_slp.as_mut() {
+            insert_l2t(l2t_slp, *anc.value().unwrap(), t_clone.clone());
+        } else {
+            insert_l2t(l2t_input, *anc.value().unwrap(), t_clone.clone());
+        }
 
-    //     LTTCP((*anc.value().unwrap(), t_clone))
-    // } else {
+        LTTCP((*anc.value().unwrap(), t_clone))
+    } else {
         insert_l2t(l2t_input, lno, transform);
 
         if l2t_slp.is_some() { LTT((lno, transform)) } else { LTTCP((lno, transform)) }
-    // }
+    }
 }
 
 /// apply_eij_prod_on_addition computes the transformation of an addition line (=L2+0.5) under a matrix representing sorted list of eij transformations
@@ -604,11 +604,12 @@ where
         )
     );
 
-    // for (ilno, tms) in input_line_map {
-    //     for (tm, olno) in tms {
-    //         insert_tm(tries, *ilno, &tm, *olno);
-    //     }
-    // }
+    // add to the tries map
+    for (ilno, tms) in input_line_map {
+        for (tm, olno) in tms {
+            insert_tm(tries, *ilno, &tm, *olno);
+        }
+    }
 
 
     // convert PartialSLP to SLP, should be case that all variables are LIP, LICP or C
@@ -686,8 +687,8 @@ where
         
         slp_res = add_scaled_p_slp_onto_curr_slp(slp_res, p_slp, i32_to_c(*coeff), &mut iline_map, &mut curr_line_map, &mut tries, i64_to_c(0)).unwrap();
 
-        let line_map = reduce_slp(&mut slp_res, i64_to_c(0), i64_to_c(1));
-        println!("{:?}: {}", eijl2m::<K>(prod), crate::evaluation::stepwise_slp_to_poly(&slp_res, i64_to_c(1)).split("\n").last().unwrap());
+        // let _line_map = reduce_slp(&mut slp_res, i64_to_c(0), i64_to_c(1));
+        // println!("{:?}: {}", eijl2m::<K>(prod), crate::evaluation::stepwise_slp_to_poly(&slp_res, i64_to_c(1)).split("\n").last().unwrap());
         // for trie in tries.values_mut() {
         //     let keys: Vec<_> = trie.keys().cloned().collect::<Vec<_>>();
         //     for key in keys{
@@ -697,7 +698,7 @@ where
         // }
     }
 
-    // let _line_map = reduce_slp(&mut slp_res, i64_to_c(0), i64_to_c(1));
+    let _line_map = reduce_slp(&mut slp_res, i64_to_c(0), i64_to_c(1));
 
     Ok(slp_res)
 }
