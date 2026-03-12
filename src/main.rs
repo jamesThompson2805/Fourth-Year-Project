@@ -1,9 +1,9 @@
-mod straight_line_program;
-mod parsing;
-mod transformations;
 mod evaluation;
-mod projections;
+mod parsing;
 mod pbw_reduce;
+mod projections;
+mod straight_line_program;
+mod transformations;
 
 /*
 use std::fs;
@@ -32,7 +32,7 @@ fn save_input_to_output(vi: &Vec::<u32>,out_name: String) -> Result<(), Box<dyn 
     },
 
     Err(s) => println!("ERROR IN PARSING: \n{s}"),
-   } 
+   }
    Ok(())
 }
 
@@ -53,7 +53,7 @@ fn print_input_to_output(vi: &Vec::<u32>) -> Result<(), Box<dyn std::error::Erro
     },
 
     Err(s) => println!("ERROR IN PARSING: \n{s}"),
-   } 
+   }
 
     Ok(())
 }
