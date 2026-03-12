@@ -506,6 +506,79 @@ where
     slp
 }
 
+/// generate_random_homogeneous_slp generates a new random slp using the parameters given.
+///
+/// num_gates is the number of gates used in the slp
+/// gen_coeff is a mutating function that generates a random coefficient
+/// del is the degree of the homogeneous metapolynomial generated
+/// d is the degree of the underlying polynomial the metapolynomial references
+/// k is the number of variables in the underlying polynomial
+pub fn generate_random_homogeneous_slp<T, F, R>(
+    num_gates: usize,
+    mut gen_coeff: F,
+    del: usize,
+    d: usize,
+    k: usize,
+    rng: &mut R,
+) -> SLP<T>
+where
+    F: FnMut() -> T,
+    R: rand::Rng,
+{
+    use Operation::*;
+    use SLPLine::*;
+    use SLPVar::*;
+    // Steps:
+    // 1. generate slp with all valid metavariables already present
+    // 2. whilst not added num_gates to slp:
+    //      2.1 choose gate type (using prob_mult)
+    //      2.2 choose the variables (using prob_choose_ref)
+    //      2.3 choose the line reference (using prob_choose_metavar)
+    // 1. Generate slp with all valid metavariables already present
+    let all_metavars = generate_all_d_k_metavars(d, k);
+    let all_metavars_len = all_metavars.len();
+    let mut slp: SLP<T> = Vec::new();
+    for m in all_metavars {
+        slp.push(Input(m));
+    }
+
+    // let largest_pow_2 = 1 << del.ilog2();
+    for _ in 0..del.ilog2()+1{
+        let m_ref = rng.random_range(0..all_metavars_len);
+        slp.push(Compound(( C(gen_coeff()), Mult, L(m_ref) )));
+    }
+    let sl = slp.len();
+    for i in 1..=del.ilog2(){
+        if rng.random_bool(0.5) {
+            slp.push(Compound(( L(sl-i as usize), Plus, L(sl-1-i as usize) )));
+        }
+    }
+
+    for num_gates in (1..del.ilog2()+1).rev() {
+        let sl = slp.len();
+        for i in 0..num_gates {
+            slp.push(Compound(( L(sl-1-i as usize), Mult, L(sl-2-i as usize)  )));
+        }
+    }
+
+    let mut del_rm = del - del.ilog2() as usize;
+    let bits: Vec<u8> = (0..usize::BITS - del.leading_zeros())
+        .rev()
+        .map(|i| ((del >> i) & 1) as u8)
+        .collect();
+    println!("bits: {bits:?}");
+    let sl = slp.len();
+    for (i,bit) in bits[1..].iter().enumerate() {
+        let i = i+1;
+        if bit == &1 {
+            let offset:usize = (0..=i).sum();
+            let rand_ref = rng.random_range( sl-offset-i-1..sl-offset );
+            slp.push(Compound(( L(slp.len()-1), Mult, L(rand_ref)  )));
+        }
+    }
+    slp
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,6 +600,25 @@ mod tests {
         let d = 3;
         let k = 3;
         let slp = generate_random_slp::<Rational64,_,_>(num_gates, gen_coeff, d, k, 0.6, 0.8, 0.3, &mut rng());
+        // println!("{}", stepwise_slp_to_poly(&slp, Rational64::ONE).split("\n").last().unwrap());
+        println!("{}", stepwise_slp_to_poly(&slp, Rational64::ONE));
+    }
+
+    #[test]
+    fn gen_random_homogeneous_slp() {
+        let mut coeff_rng = rng();
+
+        let gen_coeff = || {
+            let numer: i64 = coeff_rng.random_range(-10..10);
+            let denom: i64 = coeff_rng.random_range(1..10);  // strictly positive to avoid division by zero
+            Rational64::new(numer, denom)
+        };
+
+        let num_gates = 10;
+        let del = 11;
+        let d = 3;
+        let k = 3;
+        let slp = generate_random_homogeneous_slp::<Rational64,_,_>(num_gates, gen_coeff, del, d, k, &mut rng());
         // println!("{}", stepwise_slp_to_poly(&slp, Rational64::ONE).split("\n").last().unwrap());
         println!("{}", stepwise_slp_to_poly(&slp, Rational64::ONE));
     }
