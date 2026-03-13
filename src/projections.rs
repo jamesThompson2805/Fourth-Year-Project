@@ -1,6 +1,8 @@
 //! projections.rs contains functions to achieve the projection of a slp to a lambda-isotypic space
 #![allow(dead_code)]
 use std::fmt::Display;
+use num::One;
+use num_bigint::BigInt;
 
 use super::straight_line_program::SLP;
 use super::straight_line_program::{add_slp, scale_slp};
@@ -252,8 +254,7 @@ where T: Mul<Output=T> + Add<Output=T> + Clone + Debug,
 }
 
 /// casimir_prod_to_sorted_basis_matrices takes a list of references to casimir elements and returns a polynomial of sorted basis transforms
-fn casimir_prod_to_sorted_basis_matrices(prod: &[usize], k: usize) -> HashMap<LAProd<(usize,usize)>, i32>
-{
+fn casimir_prod_to_sorted_basis_matrices(prod: &[usize], k: usize) -> HashMap<LAProd<(usize,usize)>, i32> {
     let counts = prod.iter().map(|u| find_casimir(*u, k)).multi_cartesian_product().map(|v| v.concat()).counts(); // have distributed out product and collected counts
     counts.into_iter().map(|(k,v)|{
         let mut sorted = pbw_reduce(&k[..]);
@@ -263,7 +264,7 @@ fn casimir_prod_to_sorted_basis_matrices(prod: &[usize], k: usize) -> HashMap<LA
 }
 
 /// casimir_eq_to_sorted_basis_matrices takes a sum of scaled products of casimir elements and computes their polynomial of sorted basis elements
-fn casimir_eq_to_sorted_basis_matrices(sum: &Vec<(Vec<usize>,i32)>, k: usize) -> HashMap<LAProd<(usize, usize)>, i32> {
+fn casimir_eq_to_sorted_basis_matrices(sum: &Vec<(Vec<usize>,BigInt)>, k: usize) -> HashMap<LAProd<(usize, usize)>, BigInt> {
     sum.into_iter().map(|(v,c)| 
         casimir_prod_to_sorted_basis_matrices(v, k).into_iter().map(move |p| (p.0,p.1 * c))
     ).flatten().into_grouping_map().sum()
@@ -271,16 +272,16 @@ fn casimir_eq_to_sorted_basis_matrices(sum: &Vec<(Vec<usize>,i32)>, k: usize) ->
 
 /// eval_proj_pairs_to_sorted_basis takes a list representing the casimir element and the term to add (from eq17. in paper)
 ///  and returns the polynomial of basis transformations to make
-fn eval_proj_pairs_to_sorted_basis(v: &[(usize, i32)], k: usize) -> HashMap<LAProd<(usize,usize)>, i32> {
-    let casimir_poly = eval_proj_pairs::<i32>(v, 1);
+fn eval_proj_pairs_to_sorted_basis(v: &[(usize, BigInt)], k: usize) -> HashMap<LAProd<(usize,usize)>, BigInt> {
+    let casimir_poly = eval_proj_pairs::<BigInt>(v, BigInt::one());
     println!("casimir poly {casimir_poly:?}");
     casimir_eq_to_sorted_basis_matrices(&casimir_poly.into_iter().collect(), k)
 }
 
-fn lambda_proj_with_specific_parts(lambda: &Vec<u32>, partitions: &Vec<Vec<u32>>, k: usize) -> Option<HashMap<LAProd<(usize,usize)>, i32>> {
-    let casimirs_and_subtract:Vec<(usize, i32)> = partitions.iter().map(|p| {
+fn lambda_proj_with_specific_parts(lambda: &Vec<u32>, partitions: &Vec<Vec<u32>>, k: usize) -> Option<HashMap<LAProd<(usize,usize)>, BigInt>> {
+    let casimirs_and_subtract:Vec<(usize, BigInt)> = partitions.iter().map(|p| {
         let c_i = find_distinguishing_casimir_index(p, lambda)?;
-        Some( (c_i, -1*casimir_eigenval(c_i as u32, p, k)) )
+        Some( (c_i, BigInt::from(-1*casimir_eigenval(c_i as u32, p, k))) )
     }).flatten().collect(); // adding flatten makes it so any without distinguishing are removed
     let casimirs_and_subtract = dbg!(casimirs_and_subtract);
     Some(eval_proj_pairs_to_sorted_basis(&casimirs_and_subtract, k))
@@ -344,11 +345,11 @@ where
 pub fn apply_lambda_projection_to_slp<T, F, const K: usize>(
     slp: &SLP<T>,
     lambda: &Vec<u32>,
-    i64_to_c: F,
+    bigi_to_c: F,
 ) -> Result<SLP<T>, String>
 where
     T: Add<Output=T> + Mul<Output=T> + Div<Output=T> + Clone + Eq + Hash + Display + Debug + Default,
-    F: Fn(i64) -> T + Copy,
+    F: Fn(BigInt) -> T + Copy,
 {
     
     let k = (K as f64).sqrt() as usize;
@@ -357,14 +358,18 @@ where
     }
 
     let distinguishing_partitions: Vec<_> = find_distinguishing_parts_and_indices(&lambda).into_iter().map(|(p,c)| (p, c as u32)).collect();
-    let numerators: Vec<(usize, i32)> = distinguishing_partitions.iter().map(|(p, cas_num)| (*cas_num as usize, -1*casimir_eigenval(*cas_num, p, k))).collect();
-    // let denominator: i64 = distinguishing_partitions.iter().map(|(p, cas_num)| casimir_eigenval(*cas_num, &lambda, k) as i64 - casimir_eigenval(*cas_num, p, k) as i64 ).product();
+    let numerators: Vec<(usize, BigInt)> = distinguishing_partitions.iter().map(|(p, cas_num)| (*cas_num as usize, BigInt::from(-1*casimir_eigenval(*cas_num, p, k)) )).collect();
+    let denominator: BigInt = distinguishing_partitions.iter().map(|(p, cas_num)| BigInt::from(casimir_eigenval(*cas_num, &lambda, k)) - BigInt::from(casimir_eigenval(*cas_num, p, k)) ).product();
 
     println!("numerators: {numerators:?}");
-    // println!("denominator: {denominator}");
+    println!("denominator: {denominator}");
 
     let numerator_basis_transforms = eval_proj_pairs_to_sorted_basis(&numerators[..], k);
-    let mut slp_res = transformations::apply_eij_poly_on_program::<T,F,K>(slp, &numerator_basis_transforms, i64_to_c)?;
+    numerator_basis_transforms.iter().for_each(|(k,v)|
+        println!("{v}: {k:?}")
+    );
+    return Err("Stopping here".into());
+    let mut slp_res = transformations::apply_eij_poly_on_program::<T,F,K>(slp, &numerator_basis_transforms, bigi_to_c)?;
     
     // let scalar = i64_to_c(1) / i64_to_c( denominator );
     // scale_slp(&mut slp_res, scalar);
@@ -513,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_casimir_prod_sorting() {
-        let casimirs = vec![(vec![1,2,3],1), (vec![2,1],1)];
+        let casimirs = vec![(vec![1,2,3],BigInt::one()), (vec![2,1],BigInt::one())];
         println!("{:?}", casimir_eq_to_sorted_basis_matrices(&casimirs, 3).len());
     }
 
@@ -526,10 +531,11 @@ mod tests {
 =L3*L2";
         let slp = slp_parser_rational(slp_str).expect("Should parse SLP");
         let i64_to_c = |i| Rational64::new(i, 1);
-        let casimir_sorted = eval_proj_pairs_to_sorted_basis(&vec![(2,-12),(2,-28)], 3);
+        let bigi_to_c = |i:BigInt| Rational64::new(i.try_into().unwrap(), 1);
+        let casimir_sorted = eval_proj_pairs_to_sorted_basis(&vec![(2,BigInt::from(-12)),(2,BigInt::from(-28))], 3);
 
         println!("Casimir el 2 is {casimir_sorted:?}");
-        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &casimir_sorted, i64_to_c).unwrap();
+        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &casimir_sorted, bigi_to_c).unwrap();
 
         // println!("SLP Res: \n{}", stringify_slp(&slp_res));
         println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE).split("\n").last().unwrap());
@@ -546,10 +552,11 @@ mod tests {
 =L3*L2";
         let slp = slp_parser_rational(slp_str).expect("Should parse SLP");
         let i64_to_c = |i| Rational64::new(i, 1);
-        let casimir_sorted = eval_proj_pairs_to_sorted_basis(&vec![(2,-12),(2,-12),(2,-28)], 3);
+        let bigi_to_c = |i:BigInt| Rational64::new(i.try_into().unwrap(), 1);
+        let casimir_sorted = eval_proj_pairs_to_sorted_basis(&vec![(2,BigInt::from(-12)),(2,BigInt::from(-12)),(2,BigInt::from(-28))], 3);
 
         println!("Casimir el is {casimir_sorted:?}");
-        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &casimir_sorted, i64_to_c).unwrap();
+        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &casimir_sorted, bigi_to_c).unwrap();
 
         // println!("SLP Res: \n{}", stringify_slp(&slp_res));
         println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE).split("\n").last().unwrap());
@@ -565,8 +572,9 @@ mod tests {
 =L3*L2";
         let slp = slp_parser_rational(slp_str).expect("Should parse SLP");
         let i64_to_c = |i| Rational64::new(i, 1);
+        let bigi_to_c = |i:BigInt| Rational64::new(i.try_into().unwrap(), 1);
 
-        let slp_res = apply_lambda_projection_to_slp::<_,_,9>(&slp, &vec![6,0,0], i64_to_c).unwrap();
+        let slp_res = apply_lambda_projection_to_slp::<_,_,9>(&slp, &vec![6,0,0], bigi_to_c).unwrap();
         println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE).split("\n").last().unwrap());
     }
 
@@ -579,6 +587,7 @@ mod tests {
 =L3*L2";
         let slp = slp_parser_rational(slp_str).expect("Should parse SLP");
         let i64_to_c = |i| Rational64::new(i, 1);
+        let bigi_to_c = |i:BigInt| Rational64::new(i.try_into().unwrap(), 1);
 
         let partitions = vec![
             vec![5,1,0],
@@ -592,7 +601,7 @@ mod tests {
         
         println!("Casimir of [6,0,0] with C2 is {}", casimir_eigenval(2, &vec![6,0,0], 3));
 
-        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &basis_poly, i64_to_c).unwrap();
+        let slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &basis_poly, bigi_to_c).unwrap();
         println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE).split("\n").last().unwrap());
     }
 }

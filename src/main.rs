@@ -14,6 +14,7 @@ use evaluation::*;
 use parsing::*;
 
 use num_rational::Rational64;
+use num_bigint::BigInt;
 use rand::{Rng, rng};
 
 use std::fmt::{Display, Debug};
@@ -38,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Rational64::new(numer, denom)
     };
     let i64_to_c = |i| Rational64::new(i, 1);
+    let bigi_to_c = |i:BigInt| Rational64::new(i.try_into().unwrap(), 1);
 
     let slp_zero_str = "=0+0";
     let slp_zero = slp_parser_rational(slp_zero_str)?;
@@ -47,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut slp = generate_random_homogeneous_slp::<Rational64,_,_>(&mut gen_coeff, 11, 3, 4, &mut rng());
         reduce_slp(&mut slp, Rational64::ZERO, Rational64::ONE);
 
-        let slp_res = apply_lambda_projection_to_slp::<_,_,16>(&slp, &vec![6,6,6,6], i64_to_c)?;
+        let slp_res = apply_lambda_projection_to_slp::<_,_,16>(&slp, &vec![6,6,6,6], bigi_to_c)?;
 
         if !evaluation::are_rational_slp_similar(&slp_res, &slp_zero).1 {
             save_slp_to_file(&slp_res, "11_3_4_proj_found.txt".into());

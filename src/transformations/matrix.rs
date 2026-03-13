@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 use crate::{straight_line_program::*, transformations::apply_eij_on_metavar};
+use num_bigint::BigInt;
 
 use radix_trie::Trie;
 use radix_trie::TrieCommon;
@@ -652,12 +653,12 @@ where
 
 pub fn apply_eij_poly_on_program<T, F, const K: usize>(
     slp: &SLP<T>,
-    eijs: &HashMap<Vec<(usize, usize)>, i32>,
-    i64_to_c: F,
+    eijs: &HashMap<Vec<(usize, usize)>, BigInt>,
+    bigi_to_c: F,
 ) -> Result<SLP<T>, String>
 where
     T: Add<Output=T> + Mul<Output=T> + Clone + Eq + Hash + Display + Debug + Default,
-    F: Fn(i64) -> T + Copy,
+    F: Fn(BigInt) -> T + Copy,
 {
     use SLPLine::*;
     use SLPVar::*;
@@ -667,11 +668,10 @@ where
     let mut tries: HashMap<usize, Trie<EijList, usize>> = HashMap::new();
     let mut slp_res:SLP<T> = vec![];
 
-    let u64_to_c = |i| i64_to_c(i as i64);
-    let i32_to_c = |i| i64_to_c(i as i64);
+    let u64_to_c = |i:u64| bigi_to_c(BigInt::from(i));
 
     for (prod,coeff) in eijs.iter().sorted_by(|p1,p2| p2.0.cmp(&p1.0)) { // go through each term in order of largest product to smallest
-        if *coeff == 0 {
+        if coeff == &BigInt::ZERO {
             continue;
         }
         let (p_slp, _l2t_input, _l2t_slp,mut iline_map,mut curr_line_map) 
@@ -685,7 +685,7 @@ where
         // }
         // println!("\n");
         
-        slp_res = add_scaled_p_slp_onto_curr_slp(slp_res, p_slp, i32_to_c(*coeff), &mut iline_map, &mut curr_line_map, &mut tries, i64_to_c(0)).unwrap();
+        slp_res = add_scaled_p_slp_onto_curr_slp(slp_res, p_slp, bigi_to_c(coeff.clone()), &mut iline_map, &mut curr_line_map, &mut tries, u64_to_c(0)).unwrap();
 
         // let _line_map = reduce_slp(&mut slp_res, i64_to_c(0), i64_to_c(1));
         // println!("{:?}: {}", eijl2m::<K>(prod), crate::evaluation::stepwise_slp_to_poly(&slp_res, i64_to_c(1)).split("\n").last().unwrap());
@@ -698,7 +698,7 @@ where
         // }
     }
 
-    let _line_map = reduce_slp(&mut slp_res, i64_to_c(0), i64_to_c(1));
+    let _line_map = reduce_slp(&mut slp_res, u64_to_c(0), u64_to_c(1));
 
     Ok(slp_res)
 }
@@ -710,6 +710,7 @@ mod tests {
     use crate::evaluation::stepwise_slp_to_poly;
     use crate::parsing;
     use crate::projections;
+    use num::One;
     use num_rational::BigRational;
     use num_rational::Rational64;
     use SLPLine::*;
@@ -816,7 +817,7 @@ mod tests {
 
         let slp_res = add_scaled_p_slp_onto_curr_slp(curr_slp, p_slp, Rational64::ONE, &mut iline_map, &mut curr_line_map, &mut trie_map, Rational64::ZERO).unwrap();
         println!("slp: \n{}",stepwise_slp_to_poly(&slp_res, Rational64::ONE));
-    } // TODO : Clearly shows need for slp reduction inbetween summations
+    } 
 
     #[test]
     fn get_all_sub_transforms_test() {
@@ -824,7 +825,6 @@ mod tests {
         println!("subtransforms: {:?}", get_all_sub_transforms(transform));
     }
 
-    // TODO : Test apply_eij_poly_on_program<T, F, const K: usize> with random poly's and casimirs!
     #[test]
     fn test_apply_poly_on_program() {
         let slp_str = "=C<0,0,2>
@@ -833,14 +833,14 @@ mod tests {
 =L0*L1
 =L2*L3";
         let slp = parsing::slp_parser_rational(slp_str).expect("Should parse SLP");
-        let bases_sorted = HashMap::from([(vec![(0,0),(0,0)],1), (vec![(0,1),(1,0)],1)]);
+        let bases_sorted = HashMap::from([(vec![(0,0),(0,0)],BigInt::one()), (vec![(0,1),(1,0)],BigInt::one())]);
 
         println!("Transform {bases_sorted:?}");
-        let i64_to_c = |i| Rational64::new(i, 1);
-        let mut slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &bases_sorted, i64_to_c).unwrap();
+        let bigi_to_c = |i:BigInt| Rational64::new(i.try_into().unwrap(), 1);
+        let mut slp_res = apply_eij_poly_on_program::<_,_,9>(&slp, &bases_sorted, bigi_to_c).unwrap();
 
         println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE));
-        reduce_slp(&mut slp_res, i64_to_c(0), i64_to_c(1));
+        reduce_slp(&mut slp_res, bigi_to_c(BigInt::ZERO), bigi_to_c(BigInt::one()));
         println!("SLP Res: \n{}", stepwise_slp_to_poly(&slp_res, Rational64::ONE));
 
 
