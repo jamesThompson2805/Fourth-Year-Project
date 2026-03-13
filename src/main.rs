@@ -1,3 +1,7 @@
+use crate::parsing::slp_parser_rational;
+use crate::projections::apply_lambda_projection_to_slp;
+use crate::straight_line_program::{generate_random_homogeneous_slp, reduce_slp};
+
 mod evaluation;
 mod parsing;
 mod pbw_reduce;
@@ -5,60 +9,51 @@ mod projections;
 mod straight_line_program;
 mod transformations;
 
-/*
+use straight_line_program::*;
+use evaluation::*;
+use parsing::*;
+
+use num_rational::Rational64;
+use rand::{Rng, rng};
+
+use std::fmt::{Display, Debug};
 use std::fs;
 use std::fs::File;
 use std::io::Write;
 
-use crate::{straight_line_program::stringify_slp, transformations::transform_x_i_program};
 
-fn save_input_to_output(vi: &Vec::<u32>,out_name: String) -> Result<(), Box<dyn std::error::Error>> {
-    let contents = fs::read_to_string("input.txt")
-        .expect("Should have been able to read the file");
-
-    let res = parsing::file_parser(&contents);
-
-   match res {
-    Ok(slp) => {
-        println!("gathered output: {slp:?}");
-        println!();
-        let maybe_slp = transform_x_i_program(&slp, vi);
-        if let Some(res_slp) = maybe_slp {
-            println!("Success, received SLP");
-            let path = out_name+".txt";
-            let mut output = File::create(path)?;
-            write!(output, "===== INPUT SLP =====\n{}\n===== TRANSFORM =====\n{:?}\n===== OUTPUT SLP =====\n{}", stringify_slp(&slp), vi, stringify_slp(&res_slp))?;
-        }
-    },
-
-    Err(s) => println!("ERROR IN PARSING: \n{s}"),
-   }
-   Ok(())
+fn save_slp_to_file<T: Display + Debug>(slp: &SLP<T>, out_name: String) {
+    let path = out_name+".txt";
+    let mut output = File::create(path).unwrap();
+    write!(output, "{}", stringify_slp(&slp)).unwrap();
 }
-
-fn print_input_to_output(vi: &Vec::<u32>) -> Result<(), Box<dyn std::error::Error>> {
-    let contents = fs::read_to_string("input.txt")
-        .expect("Should have been able to read the file");
-
-    let res = parsing::file_parser(&contents);
-
-   match res {
-    Ok(slp) => {
-        println!("gathered output: {slp:?}");
-        println!();
-        let maybe_slp = transform_x_i_program(&slp, vi);
-        if let Some(slp) = maybe_slp {
-            println!("Success, received SLP:\n{}", stringify_slp(&slp));
-        }
-    },
-
-    Err(s) => println!("ERROR IN PARSING: \n{s}"),
-   }
-
-    Ok(())
-}
-    */
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    
+    let mut coeff_rng = rng();
+
+    let mut gen_coeff = || {
+        let numer: i64 = coeff_rng.random_range(-10..10);
+        let denom: i64 = coeff_rng.random_range(1..10);  // strictly positive to avoid division by zero
+        Rational64::new(numer, denom)
+    };
+    let i64_to_c = |i| Rational64::new(i, 1);
+
+    let slp_zero_str = "=0+0";
+    let slp_zero = slp_parser_rational(slp_zero_str)?;
+
+    let mut found = false;
+    while !found {
+        let mut slp = generate_random_homogeneous_slp::<Rational64,_,_>(&mut gen_coeff, 11, 3, 4, &mut rng());
+        reduce_slp(&mut slp, Rational64::ZERO, Rational64::ONE);
+
+        let slp_res = apply_lambda_projection_to_slp::<_,_,16>(&slp, &vec![6,6,6,6], i64_to_c)?;
+
+        if !evaluation::are_rational_slp_similar(&slp_res, &slp_zero).1 {
+            save_slp_to_file(&slp_res, "11_3_4_proj_found.txt".into());
+            found = true;
+        }
+    }
+
     Ok(())
 }

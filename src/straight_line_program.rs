@@ -514,7 +514,6 @@ where
 /// d is the degree of the underlying polynomial the metapolynomial references
 /// k is the number of variables in the underlying polynomial
 pub fn generate_random_homogeneous_slp<T, F, R>(
-    num_gates: usize,
     mut gen_coeff: F,
     del: usize,
     d: usize,
@@ -614,11 +613,10 @@ mod tests {
             Rational64::new(numer, denom)
         };
 
-        let num_gates = 10;
         let del = 11;
         let d = 3;
         let k = 3;
-        let slp = generate_random_homogeneous_slp::<Rational64,_,_>(num_gates, gen_coeff, del, d, k, &mut rng());
+        let slp = generate_random_homogeneous_slp::<Rational64,_,_>(gen_coeff, del, d, k, &mut rng());
         // println!("{}", stepwise_slp_to_poly(&slp, Rational64::ONE).split("\n").last().unwrap());
         println!("{}", stepwise_slp_to_poly(&slp, Rational64::ONE));
     }

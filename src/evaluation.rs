@@ -33,17 +33,17 @@ where
 
 /// eval_slp_at_point takes a dictionary of metavariables and choice of value pairs and a SLP
 /// returns the evaluated SLP if the dictionary contains all necessary metavariables otherwise None
-pub fn eval_slp_at_point<T: Add<Output=T> + Mul<Output=T> + Copy>(input_vals: &HashMap<MetaVar, T>, slp: &SLP<T>) -> Option<T> {
+pub fn eval_slp_at_point<T: Add<Output=T> + Mul<Output=T> + Clone>(input_vals: &HashMap<MetaVar, T>, slp: &SLP<T>) -> Option<T> {
     use SLPLine::*;
     use SLPVar::*;
     use Operation::*;
     let mut line_evals: Vec<T> = vec![];
     for line in slp {
         match line {
-            Input(m) => line_evals.push( *(input_vals.get(m)?) ),
+            Input(m) => line_evals.push( (input_vals.get(m)?).clone() ),
             Compound((s1, op, s2)) => {
-                let s1_val: T = *match s1 { C(c) => c, L(n) => &line_evals[*n]};
-                let s2_val: T = *match s2 { C(c) => c, L(n) => &line_evals[*n]};
+                let s1_val: T = match s1 { C(c) => c.clone(), L(n) => line_evals[*n].clone()};
+                let s2_val: T = match s2 { C(c) => c.clone(), L(n) => line_evals[*n].clone()};
 
                 match op {
                     Plus => line_evals.push( s1_val + s2_val),
@@ -52,11 +52,11 @@ pub fn eval_slp_at_point<T: Add<Output=T> + Mul<Output=T> + Copy>(input_vals: &H
             },
         }
     }
-    line_evals.last().copied()
+    line_evals.last().cloned()
 }
 
 /// are_slps_similar returns if two slps match at for a given selection of input values
-pub fn are_slps_similar<T: Add<Output=T> + Mul<Output=T> + PartialEq + Copy>(input_vals: &HashMap<MetaVar, T>, slp1: &SLP<T>, slp2: &SLP<T>) -> bool {
+pub fn are_slps_similar<T: Add<Output=T> + Mul<Output=T> + PartialEq + Clone>(input_vals: &HashMap<MetaVar, T>, slp1: &SLP<T>, slp2: &SLP<T>) -> bool {
     eval_slp_at_point(input_vals, slp1) == eval_slp_at_point(input_vals, slp2)
 }
 
